@@ -38,6 +38,7 @@
 #define UART_RX_BUF_LEN 64
 
 #define LOOP_TEST
+#define READ_TEMPLE
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -108,6 +109,7 @@ int main(void) {
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1) {
+#ifdef READ_TEMPLE
     if (dataFlag) {
       dataFlag = 0;
       printf("Get data from HC-05:");
@@ -120,6 +122,7 @@ int main(void) {
       }
       memset(RX_Buf_2, 0, sizeof(RX_Buf_2));
     }
+#endif
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
