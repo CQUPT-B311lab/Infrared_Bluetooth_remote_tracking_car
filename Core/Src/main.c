@@ -255,7 +255,7 @@ void Init_BT(uint32_t time_out) {
   dataFlag = 0;
   memset(RX_Buf_2, 0, sizeof(RX_Buf_2));
 
-  uint8_t cmd2[] = "AT+NAME?\r\n";
+  uint8_t cmd2[] = "AT+NAME=HC-05\r\n";
   HAL_UART_Transmit(&huart2, cmd2, strlen((char *)cmd2), HAL_MAX_DELAY);
   tick_start = HAL_GetTick();
   while (!dataFlag) {
@@ -266,7 +266,7 @@ void Init_BT(uint32_t time_out) {
   dataFlag = 0;
   memset(RX_Buf_2, 0, sizeof(RX_Buf_2));
 
-  uint8_t cmd3[] = "AT+PSWD?\r\n";
+  uint8_t cmd3[] = "AT+PSWD=0000\r\n";
   HAL_UART_Transmit(&huart2, cmd3, strlen((char *)cmd3), HAL_MAX_DELAY);
   tick_start = HAL_GetTick();
   while (!dataFlag) {
@@ -277,7 +277,7 @@ void Init_BT(uint32_t time_out) {
   dataFlag = 0;
   memset(RX_Buf_2, 0, sizeof(RX_Buf_2));
 
-  uint8_t cmd4[] = "AT+VERSION?\r\n";
+  uint8_t cmd4[] = "AT+UART=38400,0,0\r\n";
   HAL_UART_Transmit(&huart2, cmd4, strlen((char *)cmd4), HAL_MAX_DELAY);
   tick_start = HAL_GetTick();
   while (!dataFlag) {
@@ -288,19 +288,8 @@ void Init_BT(uint32_t time_out) {
   dataFlag = 0;
   memset(RX_Buf_2, 0, sizeof(RX_Buf_2));
 
-  uint8_t cmd5[] = "AT+UART=38400,0,0\r\n";
+  uint8_t cmd5[] = "AT+RESET\r\n";
   HAL_UART_Transmit(&huart2, cmd5, strlen((char *)cmd5), HAL_MAX_DELAY);
-  tick_start = HAL_GetTick();
-  while (!dataFlag) {
-    if (HAL_GetTick() - tick_start > time_out) {
-      Error_Handler();
-    }
-  }
-  dataFlag = 0;
-  memset(RX_Buf_2, 0, sizeof(RX_Buf_2));
-
-  uint8_t cmd6[] = "AT+RESET\r\n";
-  HAL_UART_Transmit(&huart2, cmd6, strlen((char *)cmd6), HAL_MAX_DELAY);
   tick_start = HAL_GetTick();
   while (!dataFlag) {
     if (HAL_GetTick() - tick_start > time_out) {
