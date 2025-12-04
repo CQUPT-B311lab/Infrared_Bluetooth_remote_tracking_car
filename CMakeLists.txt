@@ -45,11 +45,18 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 # Add sources to executable
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user sources here
+    Lib/OLED_JX/Src/OLED.c
+    Lib/OLED_JX/Src/OLED_Data.c
+    Lib/PID/Src/PID.c
+    Lib/Motor/Src/Motor.c
 )
 
 # Add include paths
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user defined include paths
+    Lib/OLED_JX/Inc
+    Lib/PID/Inc
+    Lib/Motor/Inc
 )
 
 # Add project symbols (macros)
