@@ -21,7 +21,9 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "Motor.h"
 #include "OLED.h"
+#include "PID.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -36,7 +38,7 @@
 /* USER CODE BEGIN PD */
 #define UART_RX_BUF_LEN 64
 
-#define LOOP_TEST
+// #define LOOP_TEST
 #define READ_TEMPLE
 #define OLED_TEST
 /* USER CODE END PD */
@@ -62,6 +64,18 @@ DMA_HandleTypeDef hdma_usart2_tx;
 /* USER CODE BEGIN PV */
 uint8_t RX_Buf_2[UART_RX_BUF_LEN] = {0};
 uint8_t dataFlag = 0;
+
+int16_t M_speed = 0;
+// int16_t M_LastSpeed = 0;
+PID_t PID;
+
+uint8_t float_buf1[20];
+uint8_t float_buf2[20];
+
+uint8_t stop_flag = 1;
+
+extern uint32_t PID_time;
+float dp = 0, di = 0, dd = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -76,11 +90,45 @@ static void MX_TIM2_Init(void);
 static void MX_TIM3_Init(void);
 /* USER CODE BEGIN PFP */
 void Init_BT(uint32_t time_out);
+char *float_to_string(float f, char *buffer, int decimal_places);
+void conf_PID(float exp);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+void conf_PID(float exp) {
+  PID.Exp = exp;
+  PID.Mea = M_speed;
+  PID_Updata(&PID);
+}
 
+void fixed_speed_step(void) {
+  PID.Mea = M_speed;
+  PID_Updata(&PID);
+  SetSpeed(&htim1, PID.Out);
+}
+
+void OLED_Show_Data(void) {
+  OLED_ShowString(0, 0, "Motor Mointor", OLED_6X8);
+  OLED_Printf(0, 8, OLED_6X8, "Speed:%s",
+              float_to_string((float)M_speed, (char *)float_buf1, 5));
+  OLED_Update();
+}
+
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
+  if (htim->Instance == TIM2) {
+    // M_LastSpeed = M_speed;
+    M_speed = GetSpeed(&htim3);
+    if (!stop_flag) {
+      fixed_speed_step();
+      printf(
+          "%s,%s\r\n",
+          float_to_string((float)M_speed / 41.0 * 280.0, (char *)float_buf1, 5),
+          float_to_string(PID.Exp / 41.0 * 280.0, (char *)float_buf2, 5));
+    }
+    // OLED_Show_Data();
+  }
+}
 /* USER CODE END 0 */
 
 /**
@@ -620,6 +668,12 @@ int __io_putchar(int ch) {
 void Error_Handler(void) {
   /* USER CODE BEGIN Error_Handler_Debug */
   /* User can add his own implementation to report the HAL error return state */
+  while (1) {
+    HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_SET);
+    HAL_Delay(500);
+    HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_RESET);
+    HAL_Delay(500);
+  }
   __disable_irq();
   while (1) {
     HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin);
