@@ -49,6 +49,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Lib/OLED_JX/Src/OLED.c
     Lib/OLED_JX/Src/OLED_Data.c
     Lib/PID/Src/PID.c
+    Lib/COM/Src/COM.c
 )
 
 # Add include paths
@@ -57,6 +58,7 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     Lib/OLED_JX/Inc
     Lib/PID/Inc
     Lib/Motor/Inc
+    Lib/COM/Inc
 )
 
 # Add project symbols (macros)

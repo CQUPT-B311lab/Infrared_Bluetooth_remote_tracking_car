@@ -21,12 +21,15 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "COM.h"
 #include "Motor.h"
 #include "OLED.h"
 #include "PID.h"
+#include "stm32f1xx_hal_uart.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/_intsup.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -36,13 +39,8 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define UART_RX_BUF_LEN 64
-#define ENCODER_PPR 41    // 编码器每转脉冲数
-#define SPEED_SCALE 280.0 // 速度换算系数
-#define PID_PERIOD_MS 10  // PID控制周期(ms)
-#define LOOP_TEST
-#define READ_TEMPLE
-#define OLED_TEST
+// #define LOOP_TEST
+// #define READ_TEMPLE
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -65,7 +63,10 @@ DMA_HandleTypeDef hdma_usart2_rx;
 DMA_HandleTypeDef hdma_usart2_tx;
 
 /* USER CODE BEGIN PV */
-uint8_t RX_Buf_2[UART_RX_BUF_LEN] = {0};
+uint8_t RX_Buf_A[UART_RX_BUF_LEN] = {0};
+uint8_t RX_Buf_B[UART_RX_BUF_LEN] = {0};
+uint8_t *RX_Buf_Active = RX_Buf_A; // DMA正在写入的
+uint8_t *RX_Buf_Ready = NULL;      // 准备好供主循环处理的
 volatile uint8_t dataFlag = 0;
 
 volatile int16_t M_speed_L = 0;
@@ -83,6 +84,7 @@ extern uint32_t PID_time;
 float dp = 0, di = 0, dd = 0;
 
 volatile uint32_t sys_tick_counter = 0;
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -176,8 +178,8 @@ int main(void) {
   MX_TIM4_Init();
   MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
-  HAL_UARTEx_ReceiveToIdle_DMA(&huart2, RX_Buf_2, UART_RX_BUF_LEN);
-  // Init_BT(1500); // 这个只需要自习一次去初始化
+  HAL_UARTEx_ReceiveToIdle_DMA(&huart2, RX_Buf_Active, UART_RX_BUF_LEN);
+  // Init_BT(1500); // 这个只需要执行一次去初始化
   OLED_Init();
   /* USER CODE END 2 */
 
@@ -185,22 +187,20 @@ int main(void) {
   /* USER CODE BEGIN WHILE */
   while (1) {
     OLED_ShowString(0, 0, "Motor Monitor", OLED_6X8);
-    OLED_ShowString(0, 16, (char *)RX_Buf_2, OLED_6X8);
+    // OLED_ShowString(0, 16, (char *)RX_Buf_Ready, OLED_6X8);
     OLED_Update();
-#ifdef READ_TEMPLE
     if (dataFlag) {
       dataFlag = 0;
-      printf("Get data from HC-05:");
-      printf("%s", (char *)RX_Buf_2);
-      printf("\r\n");
-      if (RX_Buf_2[0] == 'A') {
-        HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_RESET);
-      } else if (RX_Buf_2[0] == 'B') {
-        HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_SET);
-      }
-      memset(RX_Buf_2, 0, sizeof(RX_Buf_2));
+      // if (RX_Buf_Ready != NULL && RX_Buf_Ready[0] == '#') {
+      //   if (!cmd_parser((char *)RX_Buf_Ready))
+      //     msg(MSG_ERROR, "Bad command");
+      // } else {
+      //   msg(MSG_LOG, "Ack");
+      // }
+      // memset(RX_Buf_Ready, 0, sizeof(*RX_Buf_Ready));
+      printf("Get Data:");
+      printf("%s", RX_Buf_Ready);
     }
-#endif
     if (print_flag) {
       print_flag = 0;
 
@@ -506,7 +506,7 @@ static void MX_TIM4_Init(void) {
 
   /* USER CODE END TIM4_Init 1 */
   htim4.Instance = TIM4;
-  htim4.Init.Prescaler = 72;
+  htim4.Init.Prescaler = 72 - 1;
   htim4.Init.CounterMode = TIM_COUNTERMODE_UP;
   htim4.Init.Period = 800 - 1;
   htim4.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
@@ -668,7 +668,7 @@ static uint8_t BT_SendCmd(const char *cmd, uint32_t timeout) {
     }
   }
   dataFlag = 0;
-  memset(RX_Buf_2, 0, sizeof(RX_Buf_2));
+  memset(RX_Buf_A, 0, sizeof(RX_Buf_A));
   return 1; // 成功
 }
 
@@ -694,7 +694,7 @@ void Init_BT(uint32_t time_out) {
     Error_Handler();
 
   dataFlag = 0;
-  memset(RX_Buf_2, 0, sizeof(RX_Buf_2));
+  memset(RX_Buf_A, 0, sizeof(RX_Buf_A));
 
   // LED闪烁指示
   for (uint8_t i = 0; i < 5; i++) {
@@ -706,14 +706,17 @@ void Init_BT(uint32_t time_out) {
 void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size) {
   if (huart->Instance == USART2) {
     if (Size < UART_RX_BUF_LEN) {
-      RX_Buf_2[Size] = '\0'; // 确保字符串结尾
+      RX_Buf_Active[Size] = '\0'; // 确保字符串结尾
+    } else {
+      RX_Buf_Active[UART_RX_BUF_LEN - 1] = '\0';
+      msg(MSG_ERROR, "RX overflow");
     }
     dataFlag = 1;
-#ifdef LOOP_TEST
-    printf("Get data from HC-05:");
-    HAL_UART_Transmit_DMA(&huart2, RX_Buf_2, UART_RX_BUF_LEN);
-#endif
-    HAL_UARTEx_ReceiveToIdle_DMA(&huart2, RX_Buf_2, UART_RX_BUF_LEN);
+
+    RX_Buf_Ready = RX_Buf_Active;
+    RX_Buf_Active = (RX_Buf_Active == RX_Buf_A) ? RX_Buf_B : RX_Buf_A;
+
+    HAL_UARTEx_ReceiveToIdle_DMA(&huart2, RX_Buf_Active, UART_RX_BUF_LEN);
   }
 }
 

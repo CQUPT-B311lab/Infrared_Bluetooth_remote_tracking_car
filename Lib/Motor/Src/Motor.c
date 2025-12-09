@@ -11,18 +11,49 @@ int16_t GetSpeed(TIM_HandleTypeDef *tim) {
   return speed;
 }
 
+void Motor_Init(void) {
+  extern TIM_HandleTypeDef htim1, htim2, htim3, htim4;
+
+  // 启动PWM
+  HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
+  HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_4);
+
+  // 启动编码器
+  HAL_TIM_Encoder_Start(&htim2, TIM_CHANNEL_ALL);
+  HAL_TIM_Encoder_Start(&htim3, TIM_CHANNEL_ALL);
+
+  // 使能驱动芯片
+  HAL_GPIO_WritePin(STBY_GPIO_Port, STBY_Pin, GPIO_PIN_SET);
+}
+
 void SetSpeed(TIM_HandleTypeDef *tim, int16_t speed) {
-  if (speed > 0) {
-    __HAL_TIM_SET_COMPARE(tim, TIM_CHANNEL_1, speed);
-    HAL_GPIO_WritePin(AIN1_GPIO_Port, AIN1_Pin, GPIO_PIN_SET);
-    HAL_GPIO_WritePin(AIN2_GPIO_Port, AIN2_Pin, GPIO_PIN_RESET);
-  } else if (speed < 0) {
-    __HAL_TIM_SET_COMPARE(tim, TIM_CHANNEL_1, -speed);
-    HAL_GPIO_WritePin(AIN1_GPIO_Port, AIN1_Pin, GPIO_PIN_RESET);
-    HAL_GPIO_WritePin(AIN2_GPIO_Port, AIN2_Pin, GPIO_PIN_SET);
-  } else { // 刹车
-    __HAL_TIM_SET_COMPARE(tim, TIM_CHANNEL_1, 0);
-    HAL_GPIO_WritePin(AIN1_GPIO_Port, AIN1_Pin, GPIO_PIN_RESET);
-    HAL_GPIO_WritePin(AIN2_GPIO_Port, AIN2_Pin, GPIO_PIN_RESET);
+  uint16_t abs_speed = (speed >= 0) ? speed : -speed;
+
+  if (tim->Instance == TIM1) {
+    // 左轮 - 使用 AIN1/AIN2
+    __HAL_TIM_SET_COMPARE(tim, TIM_CHANNEL_1, abs_speed);
+    if (speed > 0) {
+      HAL_GPIO_WritePin(AIN1_GPIO_Port, AIN1_Pin, GPIO_PIN_SET);
+      HAL_GPIO_WritePin(AIN2_GPIO_Port, AIN2_Pin, GPIO_PIN_RESET);
+    } else if (speed < 0) {
+      HAL_GPIO_WritePin(AIN1_GPIO_Port, AIN1_Pin, GPIO_PIN_RESET);
+      HAL_GPIO_WritePin(AIN2_GPIO_Port, AIN2_Pin, GPIO_PIN_SET);
+    } else {
+      HAL_GPIO_WritePin(AIN1_GPIO_Port, AIN1_Pin, GPIO_PIN_RESET);
+      HAL_GPIO_WritePin(AIN2_GPIO_Port, AIN2_Pin, GPIO_PIN_RESET);
+    }
+  } else if (tim->Instance == TIM4) {
+    // 右轮 - 使用 BIN1/BIN2，注意TIM4用的是CHANNEL_4
+    __HAL_TIM_SET_COMPARE(tim, TIM_CHANNEL_4, abs_speed);
+    if (speed > 0) {
+      HAL_GPIO_WritePin(BIN1_GPIO_Port, BIN1_Pin, GPIO_PIN_SET);
+      HAL_GPIO_WritePin(BIN2_GPIO_Port, BIN2_Pin, GPIO_PIN_RESET);
+    } else if (speed < 0) {
+      HAL_GPIO_WritePin(BIN1_GPIO_Port, BIN1_Pin, GPIO_PIN_RESET);
+      HAL_GPIO_WritePin(BIN2_GPIO_Port, BIN2_Pin, GPIO_PIN_SET);
+    } else {
+      HAL_GPIO_WritePin(BIN1_GPIO_Port, BIN1_Pin, GPIO_PIN_RESET);
+      HAL_GPIO_WritePin(BIN2_GPIO_Port, BIN2_Pin, GPIO_PIN_RESET);
+    }
   }
 }
