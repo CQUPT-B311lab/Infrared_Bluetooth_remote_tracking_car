@@ -4,6 +4,7 @@
 #include "main.h"
 #include "stdio.h"
 #include "stdlib.h"
+#include "stm32f1xx_hal_uart.h"
 #include "string.h"
 
 extern UART_HandleTypeDef huart2;
@@ -46,14 +47,14 @@ uint8_t msg(UART_MSG_ID_t msg_id, const char *info) {
   if (total_len < 0 || total_len >= (int)sizeof(tx_buffer)) {
     // 发送错误消息（手动构造避免递归）
     const char *overflow_msg = "#2|18:MSG_BUFFER_OVERFLOW\n";
-    HAL_UART_Transmit(&huart2, (uint8_t *)overflow_msg, strlen(overflow_msg),
-                      100);
+    HAL_UART_Transmit_DMA(&huart2, (uint8_t *)overflow_msg,
+                          strlen(overflow_msg));
     return 0;
   }
 
   // 发送消息
   HAL_StatusTypeDef status =
-      HAL_UART_Transmit(&huart2, (uint8_t *)tx_buffer, total_len, 100);
+      HAL_UART_Transmit_DMA(&huart2, (uint8_t *)tx_buffer, total_len);
   return (status == HAL_OK) ? 1 : 0;
 }
 

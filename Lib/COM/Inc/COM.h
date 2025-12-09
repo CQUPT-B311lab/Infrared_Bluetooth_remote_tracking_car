@@ -9,8 +9,10 @@ typedef enum {
   MSG_DEBUG = 1,
   MSG_ERROR = 2,
   MSG_OTA = 3,
-  MSG_SPEED = 4,    // 小车2个轮子实际速度与目标速度
-  MSG_GYROSCOPE = 5 // 陀螺仪数据
+  MSG_SPEED = 4,     // 小车2个轮子实际速度与目标速度
+  MSG_GYROSCOPE = 5, // 陀螺仪数据
+  MSG_OTA_RETRY = 6,
+  MSG_OTA_ACK = 7,
 } UART_MSG_ID_t;
 
 // 上位机指令
