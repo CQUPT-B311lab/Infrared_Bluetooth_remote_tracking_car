@@ -28,6 +28,8 @@ typedef enum {
   CMD_SET_TARGET_SPEED = 14,
   CMD_GET_PID = 15,   // 获取当前PID参数
   CMD_RESET_PID = 16, // 重置PID状态
+  // 测试指令
+  CMD_PING = 20,
 } UART_CMD_ID_t;
 
 uint8_t msg(UART_MSG_ID_t msg_id, const char *info);

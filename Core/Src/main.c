@@ -191,34 +191,28 @@ int main(void) {
     OLED_Update();
     if (dataFlag) {
       dataFlag = 0;
-      // if (RX_Buf_Ready != NULL && RX_Buf_Ready[0] == '#') {
-      //   if (!cmd_parser((char *)RX_Buf_Ready))
-      //     msg(MSG_ERROR, "Bad command");
-      // } else {
-      //   msg(MSG_LOG, "Ack");
-      // }
-      // memset(RX_Buf_Ready, 0, sizeof(*RX_Buf_Ready));
-      printf("Get Data:");
-      printf("%s", RX_Buf_Ready);
+      if (RX_Buf_Ready != NULL && RX_Buf_Ready[0] == '#') {
+        if (!cmd_parser((char *)RX_Buf_Ready)) {
+        }
+      }
+      if (print_flag) {
+        print_flag = 0;
+
+        // 将速度转换为实际速度（假设转换公式为：速度 =  (脉冲数/41.0)*280.0）
+        // float current_speed_L = (float)M_speed_L / ENCODER_PPR * SPEED_SCALE;
+        // float exp_speed = PID.Exp / 41.0 * 280.0; // 假设PID.Exp是目标脉冲数
+
+        // // 打印当前速度和目标速度
+        // printf("%s,%s\r\n", float_to_string(current_speed_L, float_buf1, 5),
+        //        float_to_string(exp_speed, float_buf2, 5));
+      }
+      /* USER CODE END WHILE */
+
+      /* USER CODE BEGIN 3 */
     }
-    if (print_flag) {
-      print_flag = 0;
-
-      // 将速度转换为实际速度（假设转换公式为：速度 =  (脉冲数/41.0)*280.0）
-      // float current_speed_L = (float)M_speed_L / ENCODER_PPR * SPEED_SCALE;
-      // float exp_speed = PID.Exp / 41.0 * 280.0; // 假设PID.Exp是目标脉冲数
-
-      // // 打印当前速度和目标速度
-      // printf("%s,%s\r\n", float_to_string(current_speed_L, float_buf1, 5),
-      //        float_to_string(exp_speed, float_buf2, 5));
-    }
-    /* USER CODE END WHILE */
-
-    /* USER CODE BEGIN 3 */
+    /* USER CODE END 3 */
   }
-  /* USER CODE END 3 */
 }
-
 /**
  * @brief System Clock Configuration
  * @retval None
@@ -741,7 +735,8 @@ int __io_putchar(int ch) {
  */
 void Error_Handler(void) {
   /* USER CODE BEGIN Error_Handler_Debug */
-  /* User can add his own implementation to report the HAL error return state */
+  /* User can add his own implementation to report the HAL error return state
+   */
   __disable_irq();
   while (1) {
     HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin);
@@ -761,8 +756,8 @@ void Error_Handler(void) {
 void assert_failed(uint8_t *file, uint32_t line) {
   /* USER CODE BEGIN 6 */
   /* User can add his own implementation to report the file name and line
-     number, ex: printf("Wrong parameters value: file %s on line %d\r\n", file,
-     line) */
+     number, ex: printf("Wrong parameters value: file %s on line %d\r\n",
+     file, line) */
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */

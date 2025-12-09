@@ -241,6 +241,10 @@ uint8_t cmd_parser(const char *cmd) {
     msg(MSG_LOG, response);
     return 1;
   }
+  case CMD_PING: {
+    msg(MSG_LOG, "Ack Ping");
+    return 1;
+  }
 
   default: {
     snprintf(response, sizeof(response), "Unknown CMD:%d", cmd_id);
