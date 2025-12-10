@@ -22,6 +22,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "COM.h"
+#include "MPU6500.h"
 #include "Motor.h"
 #include "OLED.h"
 #include "PID.h"
@@ -51,8 +52,6 @@
 /* Private variables ---------------------------------------------------------*/
 ADC_HandleTypeDef hadc1;
 
-CRC_HandleTypeDef hcrc;
-
 SPI_HandleTypeDef hspi1;
 
 TIM_HandleTypeDef htim1;
@@ -78,6 +77,7 @@ PID_t PID = {0};
 
 char float_buf1[20];
 char float_buf2[20];
+char float_buf3[20];
 
 volatile uint8_t print_flag = 0;
 volatile uint8_t stop_flag = 1;
@@ -100,7 +100,6 @@ static void MX_TIM1_Init(void);
 static void MX_TIM3_Init(void);
 static void MX_TIM4_Init(void);
 static void MX_TIM2_Init(void);
-static void MX_CRC_Init(void);
 /* USER CODE BEGIN PFP */
 void Init_BT(uint32_t time_out);
 char *float_to_string(float f, char *buffer, int decimal_places);
@@ -180,19 +179,24 @@ int main(void) {
   MX_TIM3_Init();
   MX_TIM4_Init();
   MX_TIM2_Init();
-  MX_CRC_Init();
   /* USER CODE BEGIN 2 */
   HAL_UARTEx_ReceiveToIdle_DMA(&huart2, RX_Buf_Active, UART_RX_BUF_LEN);
   // Init_BT(1500); // 这个只需要执行一次去初始化
   OLED_Init();
+  MPU6500_Init();
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1) {
-    OLED_ShowString(0, 0, "Motor Monitor", OLED_6X8);
-    // OLED_ShowString(0, 16, (char *)RX_Buf_Ready, OLED_6X8);
-    OLED_Update();
+    MPU6500_Angle angle;
+    MPU6500_Compute_Angles(&angle);
+
+    // OLED_ShowString(0, 0, "Motor Monitor", OLED_6X8);
+    // OLED_Printf(16, 0, OLED_6X8, "Roll:%.2f, Pitch:%.2f, Yaw:%.2f
+    // temp:%.2f\n",
+    //             angle.pitch, angle.yaw, angle.temp);
+    // OLED_Update();
     if (dataFlag) {
       dataFlag = 0;
       if (RX_Buf_Ready != NULL && RX_Buf_Ready[0] == '#') {
@@ -210,12 +214,13 @@ int main(void) {
         // printf("%s,%s\r\n", float_to_string(current_speed_L, float_buf1, 5),
         //        float_to_string(exp_speed, float_buf2, 5));
       }
-      /* USER CODE END WHILE */
-
-      /* USER CODE BEGIN 3 */
     }
-    /* USER CODE END 3 */
+    msg_gyroscope(angle.yaw, angle.pitch, angle.roll);
+    /* USER CODE END WHILE */
+
+    /* USER CODE BEGIN 3 */
   }
+  /* USER CODE END 3 */
 }
 
 /**
@@ -304,29 +309,6 @@ static void MX_ADC1_Init(void) {
 }
 
 /**
- * @brief CRC Initialization Function
- * @param None
- * @retval None
- */
-static void MX_CRC_Init(void) {
-
-  /* USER CODE BEGIN CRC_Init 0 */
-
-  /* USER CODE END CRC_Init 0 */
-
-  /* USER CODE BEGIN CRC_Init 1 */
-
-  /* USER CODE END CRC_Init 1 */
-  hcrc.Instance = CRC;
-  if (HAL_CRC_Init(&hcrc) != HAL_OK) {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN CRC_Init 2 */
-
-  /* USER CODE END CRC_Init 2 */
-}
-
-/**
  * @brief SPI1 Initialization Function
  * @param None
  * @retval None
@@ -345,8 +327,8 @@ static void MX_SPI1_Init(void) {
   hspi1.Init.Mode = SPI_MODE_MASTER;
   hspi1.Init.Direction = SPI_DIRECTION_2LINES;
   hspi1.Init.DataSize = SPI_DATASIZE_8BIT;
-  hspi1.Init.CLKPolarity = SPI_POLARITY_HIGH;
-  hspi1.Init.CLKPhase = SPI_PHASE_2EDGE;
+  hspi1.Init.CLKPolarity = SPI_POLARITY_LOW;
+  hspi1.Init.CLKPhase = SPI_PHASE_1EDGE;
   hspi1.Init.NSS = SPI_NSS_HARD_OUTPUT;
   hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_128;
   hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;

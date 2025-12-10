@@ -3,13 +3,14 @@
         {
             "type": "stgdbtarget",
             "request": "launch",
-            "name": "STM32Cube: STM32 Launch Generic GDB Server",
+            "name": "STM32Cube: STM32 Launch DAP-Link GDB Server",
             "origin": "snippet",
             "cwd": "${workspaceFolder}",
             "preBuild": "${command:st-stm32-ide-debug-launch.build}",
             "program": "${command:st-stm32-ide-debug-launch.get-projects-binary-from-context1}",
+            "preLaunchTask": "CMake: 生成",
             "gdb": "${command:st-stm32-ide-debug-launch.get-gdb-executable}",
-            "serverExe": "openocd",
+            "serverExe": "bin\\openocd.exe",
             "serverParameters": [
                 "-f",
                 "interface/cmsis-dap.cfg",
@@ -18,7 +19,7 @@
             ],
             "serverHost": "localhost",
             "serverPort": "3333",
-            "serverCwd": "",
+            "serverCwd": "D:\\OpenOCD",
             "runEntry": "main",
             "imagesAndSymbols": [
                 {
@@ -28,7 +29,7 @@
                     "symbolOffset": ""
                 }
             ],
-            "verbose": true
+            "verbose": true,
         }
     ]
 }
