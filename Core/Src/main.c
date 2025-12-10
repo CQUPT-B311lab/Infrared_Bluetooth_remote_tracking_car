@@ -26,6 +26,7 @@
 #include "Motor.h"
 #include "OLED.h"
 #include "PID.h"
+#include "stm32f1xx_hal_gpio.h"
 #include "stm32f1xx_hal_uart.h"
 #include <stdint.h>
 #include <stdio.h>
@@ -102,7 +103,6 @@ static void MX_TIM4_Init(void);
 static void MX_TIM2_Init(void);
 /* USER CODE BEGIN PFP */
 void Init_BT(uint32_t time_out);
-char *float_to_string(float f, char *buffer, int decimal_places);
 void conf_PID(float exp);
 void HAL_SYSTICK_Callback(void);
 /* USER CODE END PFP */
@@ -184,6 +184,7 @@ int main(void) {
   // Init_BT(1500); // 这个只需要执行一次去初始化
   OLED_Init();
   MPU6500_Init();
+  HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_SET);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -216,6 +217,7 @@ int main(void) {
       }
     }
     msg_gyroscope(angle.yaw, angle.pitch, angle.roll);
+    HAL_Delay(10);
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -327,9 +329,9 @@ static void MX_SPI1_Init(void) {
   hspi1.Init.Mode = SPI_MODE_MASTER;
   hspi1.Init.Direction = SPI_DIRECTION_2LINES;
   hspi1.Init.DataSize = SPI_DATASIZE_8BIT;
-  hspi1.Init.CLKPolarity = SPI_POLARITY_LOW;
-  hspi1.Init.CLKPhase = SPI_PHASE_1EDGE;
-  hspi1.Init.NSS = SPI_NSS_HARD_OUTPUT;
+  hspi1.Init.CLKPolarity = SPI_POLARITY_HIGH;
+  hspi1.Init.CLKPhase = SPI_PHASE_2EDGE;
+  hspi1.Init.NSS = SPI_NSS_SOFT;
   hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_128;
   hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
   hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
@@ -600,15 +602,22 @@ static void MX_GPIO_Init(void) {
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOA, SPI_NSS_Pin | LED_Pin, GPIO_PIN_SET);
+
+  /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(
       GPIOB, SDA_Pin | SCL_Pin | AIN2_Pin | AIN1_Pin | BIN2_Pin | BIN1_Pin,
       GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_SET);
-
-  /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(STBY_GPIO_Port, STBY_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pins : SPI_NSS_Pin LED_Pin STBY_Pin */
+  GPIO_InitStruct.Pin = SPI_NSS_Pin | LED_Pin | STBY_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
   /*Configure GPIO pins : SDA_Pin SCL_Pin AIN2_Pin AIN1_Pin
                            BIN2_Pin BIN1_Pin */
@@ -618,13 +627,6 @@ static void MX_GPIO_Init(void) {
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
-
-  /*Configure GPIO pins : LED_Pin STBY_Pin */
-  GPIO_InitStruct.Pin = LED_Pin | STBY_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 

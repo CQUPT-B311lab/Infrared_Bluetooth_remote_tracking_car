@@ -77,8 +77,12 @@ void msg_speed(float speed_L, float speed_R, float target) {
  * @param roll 翻滚角
  */
 void msg_gyroscope(float yaw, float pitch, float roll) {
-  char buf[48];
-  snprintf(buf, sizeof(buf), "%.2f,%.2f,%.2f", yaw, pitch, roll);
+  char buf[48] = {'\0'};
+  char buf1[8] = {'\0'};
+  char buf2[8] = {'\0'};
+  char buf3[8] = {'\0'};
+  snprintf(buf, sizeof(buf), "%s,%s,%s", float_to_string(yaw, buf1, 2),
+           float_to_string(pitch, buf2, 2), float_to_string(roll, buf3, 2));
   msg(MSG_GYROSCOPE, buf);
 }
 

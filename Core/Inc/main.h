@@ -55,10 +55,12 @@ void HAL_TIM_MspPostInit(TIM_HandleTypeDef *htim);
 void Error_Handler(void);
 
 /* USER CODE BEGIN EFP */
-
+char *float_to_string(float f, char *buffer, int decimal_places);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
+#define SPI_NSS_Pin GPIO_PIN_4
+#define SPI_NSS_GPIO_Port GPIOA
 #define SDA_Pin GPIO_PIN_10
 #define SDA_GPIO_Port GPIOB
 #define SCL_Pin GPIO_PIN_11
