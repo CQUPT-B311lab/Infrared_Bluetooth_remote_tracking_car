@@ -171,23 +171,35 @@
 // 设备ID
 #define MPU6500_DEVICE_ID 0x70
 
-// 数据结构定义
+// 新的数据结构定义
+// 注意：坐标系定义已根据您的注释调整
+// x_acc：正方向为垂直于小车前进方向的左边
+// y_acc：正方向为小车前进方向的反方向
+// z_acc：正方向为垂直于小车底盘平面向上
 typedef struct {
-  float roll;  // 横滚角 (度)
-  float pitch; // 俯仰角 (度)
-  float yaw;   // 偏航角 (度)
+  float roll;  // 横滚角 (度) - 绕X轴旋转
+  float pitch; // 俯仰角 (度) - 绕Y轴旋转
+  float yaw;   // 偏航角 (度) - 绕Z轴旋转
   float temp;  // 温度 (°C)
-} MPU6500_Angle;
+  float x_acc; // X方向加速度 (g) - 正方向为垂直于小车前进方向的左边
+  float y_acc; // Y方向加速度 (g) - 正方向为小车前进方向的反方向
+  float z_acc; // Z方向加速度 (g) - 正方向为垂直于小车底盘平面向上
+} MPU6500_Data;
 
 // 函数声明
 void MPU6500_Init(void);
 void MPU6500_Init_With_Calibration(void);
 void MPU6500_Write_Byte(uint8_t reg, uint8_t data);
 uint8_t MPU6500_Read_Byte(uint8_t reg);
-void MPU6500_Read_Data(int16_t *ax, int16_t *ay, int16_t *az, int16_t *gx,
-                       int16_t *gy, int16_t *gz, int16_t *temp);
+void MPU6500_Read_Raw_Data(int16_t *ax, int16_t *ay, int16_t *az, int16_t *gx,
+                           int16_t *gy, int16_t *gz, int16_t *temp);
 void MPU6500_Calibrate_Gyro(uint16_t samples);
-void MPU6500_Compute_Angles(MPU6500_Angle *angle);
-int is_device_stationary(void);
+void MPU6500_Get_All_Data(MPU6500_Data *data);
+void MPU6500_Compute_Angles(MPU6500_Data *data);
+int MPU6500_Is_Device_Stationary(void);
+
+// 工具函数
+void MPU6500_Print_Data(MPU6500_Data *data);
+void MPU6500_Self_Test(void);
 
 #endif /* __MPU6500_H */

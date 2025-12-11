@@ -9,10 +9,11 @@ typedef enum {
   MSG_DEBUG = 1,
   MSG_ERROR = 2,
   MSG_OTA = 3,
-  MSG_SPEED = 4,     // 小车2个轮子实际速度与目标速度
-  MSG_GYROSCOPE = 5, // 陀螺仪数据
-  MSG_OTA_RETRY = 6,
-  MSG_OTA_ACK = 7,
+  MSG_SPEED = 4,        // 小车2个轮子实际速度与目标速度
+  MSG_GYROSCOPE = 5,    // 陀螺仪数据
+  MSG_ACCELERATION = 6, // 加速度仪数据
+  MSG_OTA_RETRY = 7,
+  MSG_OTA_ACK = 8,
 } UART_MSG_ID_t;
 
 // 上位机指令
@@ -36,9 +37,13 @@ typedef enum {
 
 uint8_t msg(UART_MSG_ID_t msg_id, const char *info);
 
+uint8_t msgf(UART_MSG_ID_t msg_id, char *format, ...);
+
 void msg_speed(float speed_L, float speed_R, float target);
 
 void msg_gyroscope(float yaw, float pitch, float roll);
+
+void msg_acceleration(float x_acc, float y_acc, float z_acc);
 
 uint8_t cmd_parser(const char *cmd);
 

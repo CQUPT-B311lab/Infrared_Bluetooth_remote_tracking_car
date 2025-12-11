@@ -32,6 +32,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/_intsup.h>
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -182,16 +183,16 @@ int main(void) {
   /* USER CODE BEGIN 2 */
   HAL_UARTEx_ReceiveToIdle_DMA(&huart2, RX_Buf_Active, UART_RX_BUF_LEN);
   // Init_BT(1500); // 这个只需要执行一次去初始化
-  OLED_Init();
+  // OLED_Init();
   MPU6500_Init();
   HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_SET);
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+  MPU6500_Data sensor_data;
   while (1) {
-    MPU6500_Angle angle;
-    MPU6500_Compute_Angles(&angle);
+    MPU6500_Get_All_Data(&sensor_data);
 
     // OLED_ShowString(0, 0, "Motor Monitor", OLED_6X8);
     // OLED_Printf(16, 0, OLED_6X8, "Roll:%.2f, Pitch:%.2f, Yaw:%.2f
@@ -216,7 +217,8 @@ int main(void) {
         //        float_to_string(exp_speed, float_buf2, 5));
       }
     }
-    msg_gyroscope(angle.yaw, angle.pitch, angle.roll);
+    // msg_gyroscope(sensor_data.yaw, sensor_data.pitch, sensor_data.roll);
+    msg_acceleration(sensor_data.x_acc, sensor_data.y_acc, sensor_data.z_acc);
     HAL_Delay(10);
     /* USER CODE END WHILE */
 
@@ -665,49 +667,49 @@ char *float_to_string(float f, char *buffer, int decimal_places) {
   return buffer;
 }
 
-static uint8_t BT_SendCmd(const char *cmd, uint32_t timeout) {
-  HAL_UART_Transmit(&huart2, (uint8_t *)cmd, strlen(cmd), HAL_MAX_DELAY);
-  uint32_t tick_start = HAL_GetTick();
-  while (!dataFlag) {
-    if (HAL_GetTick() - tick_start > timeout) {
-      return 0; // 超时
-    }
-  }
-  dataFlag = 0;
-  memset(RX_Buf_A, 0, sizeof(RX_Buf_A));
-  return 1; // 成功
-}
+// static uint8_t BT_SendCmd(const char *cmd, uint32_t timeout) {
+//   HAL_UART_Transmit(&huart2, (uint8_t *)cmd, strlen(cmd), HAL_MAX_DELAY);
+//   uint32_t tick_start = HAL_GetTick();
+//   while (!dataFlag) {
+//     if (HAL_GetTick() - tick_start > timeout) {
+//       return 0; // 超时
+//     }
+//   }
+//   dataFlag = 0;
+//   memset(RX_Buf_A, 0, sizeof(RX_Buf_A));
+//   return 1; // 成功
+// }
 
-void Init_BT(uint32_t time_out) {
-  if (!BT_SendCmd("AT\r\n", time_out))
-    Error_Handler();
-  if (!BT_SendCmd("AT+ORGL\r\n", time_out))
-    Error_Handler();
-  if (!BT_SendCmd("AT+ROLE=0\r\n", time_out))
-    Error_Handler();
-  // 这个版本的HC-05密码是6位数字
-  if (!BT_SendCmd("AT+PSWD=123456\r\n", time_out))
-    Error_Handler();
-  if (!BT_SendCmd("AT+NAME=STM32-OTA\r\n", time_out))
-    Error_Handler();
-  if (!BT_SendCmd("AT+UART=38400,0,0\r\n", time_out))
-    Error_Handler();
-  if (!BT_SendCmd("AT+CMODE=1\r\n", time_out))
-    Error_Handler();
-  if (!BT_SendCmd("AT+ADDR?\r\n", time_out)) // 20:4D:E9:1C:EE:99
-    Error_Handler();
-  if (!BT_SendCmd("AT+RESET\r\n", time_out))
-    Error_Handler();
+// void Init_BT(uint32_t time_out) {
+//   if (!BT_SendCmd("AT\r\n", time_out))
+//     Error_Handler();
+//   if (!BT_SendCmd("AT+ORGL\r\n", time_out))
+//     Error_Handler();
+//   if (!BT_SendCmd("AT+ROLE=0\r\n", time_out))
+//     Error_Handler();
+//   // 这个版本的HC-05密码是6位数字
+//   if (!BT_SendCmd("AT+PSWD=123456\r\n", time_out))
+//     Error_Handler();
+//   if (!BT_SendCmd("AT+NAME=STM32-OTA\r\n", time_out))
+//     Error_Handler();
+//   if (!BT_SendCmd("AT+UART=38400,0,0\r\n", time_out))
+//     Error_Handler();
+//   if (!BT_SendCmd("AT+CMODE=1\r\n", time_out))
+//     Error_Handler();
+//   if (!BT_SendCmd("AT+ADDR?\r\n", time_out)) // 20:4D:E9:1C:EE:99
+//     Error_Handler();
+//   if (!BT_SendCmd("AT+RESET\r\n", time_out))
+//     Error_Handler();
 
-  dataFlag = 0;
-  memset(RX_Buf_A, 0, sizeof(RX_Buf_A));
+//   dataFlag = 0;
+//   memset(RX_Buf_A, 0, sizeof(RX_Buf_A));
 
-  // LED闪烁指示
-  for (uint8_t i = 0; i < 5; i++) {
-    HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin);
-    HAL_Delay(100);
-  }
-}
+//   // LED闪烁指示
+//   for (uint8_t i = 0; i < 5; i++) {
+//     HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin);
+//     HAL_Delay(100);
+//   }
+// }
 
 void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size) {
   if (huart->Instance == USART2) {

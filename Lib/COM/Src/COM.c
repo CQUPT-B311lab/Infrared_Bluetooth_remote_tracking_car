@@ -2,6 +2,7 @@
 #include "Motor.h"
 #include "PID.h"
 #include "main.h"
+#include "stdarg.h"
 #include "stdio.h"
 #include "stdlib.h"
 #include "stm32f1xx_hal_uart.h"
@@ -24,6 +25,7 @@ extern volatile int16_t M_speed_R;
 
 // 通信消息格式化（也便于vofa解析）：#消息类型|长度:内容\n
 //                                   ^数字   ^数字
+
 /**
  * @brief 向上位机发送格式化消息
  * @param msg_id 消息类型枚举
@@ -59,6 +61,23 @@ uint8_t msg(UART_MSG_ID_t msg_id, const char *info) {
 }
 
 /**
+ * @brief 向上位机发送带格式的格式化消息
+ * @param msg_id 消息类型枚举
+ * @param ··· 参数列表
+ * @param format 指定要显示的格式化字符串
+ * @retval 1:成功 0:失败
+ */
+uint8_t msgf(UART_MSG_ID_t msg_id, char *format, ...) {
+  char String[128];      // 定义字符数组
+  va_list arg;           // 定义可变参数列表数据类型的变量arg
+  va_start(arg, format); // 从format开始，接收参数列表到arg变量
+  vsprintf(String, format,
+           arg); // 使用vsprintf打印格式化字符串和参数列表到字符数组中
+  va_end(arg);   // 结束变量arg
+  return msg(msg_id, String);
+}
+
+/**
  * @brief 发送速度数据的快速函数
  * @param speed_L 左轮速度
  * @param speed_R 右轮速度
@@ -84,6 +103,22 @@ void msg_gyroscope(float yaw, float pitch, float roll) {
   snprintf(buf, sizeof(buf), "%s,%s,%s", float_to_string(yaw, buf1, 2),
            float_to_string(pitch, buf2, 2), float_to_string(roll, buf3, 2));
   msg(MSG_GYROSCOPE, buf);
+}
+
+/**
+ * @brief 发送加速度仪数据的快速函数
+ * @param x_acc x加速度
+ * @param y_acc y加速度
+ * @param z_acc z加速度
+ */
+void msg_acceleration(float x_acc, float y_acc, float z_acc) {
+  char buf[48] = {'\0'};
+  char buf1[8] = {'\0'};
+  char buf2[8] = {'\0'};
+  char buf3[8] = {'\0'};
+  snprintf(buf, sizeof(buf), "%s,%s,%s", float_to_string(x_acc, buf1, 2),
+           float_to_string(y_acc, buf2, 2), float_to_string(z_acc, buf3, 2));
+  msg(MSG_ACCELERATION, buf);
 }
 
 /**
