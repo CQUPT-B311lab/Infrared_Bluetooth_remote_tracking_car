@@ -27,6 +27,7 @@
 #include "OLED.h"
 #include "PID.h"
 #include "stm32f1xx_hal_gpio.h"
+#include "stm32f1xx_hal_tim.h"
 #include "stm32f1xx_hal_uart.h"
 #include <stdint.h>
 #include <stdio.h>
@@ -185,6 +186,8 @@ int main(void) {
   // Init_BT(1500); // 这个只需要执行一次去初始化
   // OLED_Init();
   MPU6500_Init();
+  HAL_TIM_Encoder_Start(&htim2, TIM_CHANNEL_ALL);
+  HAL_TIM_Encoder_Start(&htim3, TIM_CHANNEL_ALL);
   HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_SET);
   /* USER CODE END 2 */
 
@@ -218,8 +221,10 @@ int main(void) {
       }
     }
     // msg_gyroscope(sensor_data.yaw, sensor_data.pitch, sensor_data.roll);
-    msg_acceleration(sensor_data.x_acc, sensor_data.y_acc, sensor_data.z_acc);
-    HAL_Delay(10);
+    // msg_acceleration(sensor_data.x_acc, sensor_data.y_acc,
+    // sensor_data.z_acc);
+    msgf(MSG_LOG, "%d, %d", GetSpeed(&htim2), GetSpeed(&htim3));
+    HAL_Delay(100);
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */

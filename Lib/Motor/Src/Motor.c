@@ -1,12 +1,18 @@
 
 #include "main.h"
+#include "stm32f103xb.h"
 #include "stm32f1xx_hal.h"
 #include "stm32f1xx_hal_gpio.h"
 #include "stm32f1xx_hal_tim.h"
 #include <stdint.h>
 
 int16_t GetSpeed(TIM_HandleTypeDef *tim) {
-  int16_t speed = (int16_t)__HAL_TIM_GET_COUNTER(tim);
+  int16_t speed;
+  if (tim->Instance == TIM2) {
+    speed = -(int16_t)__HAL_TIM_GET_COUNTER(tim);
+  } else {
+    speed = (int16_t)__HAL_TIM_GET_COUNTER(tim);
+  }
   __HAL_TIM_SET_COUNTER(tim, 0);
   return speed;
 }
