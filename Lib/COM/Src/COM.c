@@ -23,6 +23,12 @@ extern PID_t PID;
 extern volatile int16_t M_speed_L;
 extern volatile int16_t M_speed_R;
 
+extern volatile float target_L;
+extern volatile float target_R;
+
+extern PID_t pid_L;
+extern PID_t pid_R;
+
 // 通信消息格式化（也便于vofa解析）：#消息类型|长度:内容\n
 //                                   ^数字   ^数字
 
@@ -181,6 +187,18 @@ uint8_t cmd_parser(const char *cmd) {
     // TODO: 跳转到Bootloader
     return 1;
 
+  case CMD_SET_SPEED: {
+    if (strlen(param) == 0) {
+      msg(MSG_ERROR, "GO_STRAIGHT needs speed");
+      return 0;
+    }
+    float speed = atof(param);
+
+    target_L = speed;
+    target_R = speed;
+
+    return 1;
+  }
   case CMD_GO_STRAIGHT: {
     if (strlen(param) == 0) {
       msg(MSG_ERROR, "GO_STRAIGHT needs speed");
@@ -189,7 +207,8 @@ uint8_t cmd_parser(const char *cmd) {
     float speed = atof(param);
 
     // 设置PID目标速度
-    PID.Exp = speed;
+    target_L = speed;
+    target_R = speed;
     stop_flag = 0;
 
     // 两轮同向同速（直行）
@@ -229,11 +248,6 @@ uint8_t cmd_parser(const char *cmd) {
 
   case CMD_STOP:
     stop_flag = 1;
-    PID.Exp = 0;
-    PID.Out = 0;
-    PID.I = 0; // 清除积分项
-    SetSpeed(&htim1, 0);
-    SetSpeed(&htim4, 0);
     msg(MSG_LOG, "STOPPED");
     return 1;
 
@@ -243,14 +257,31 @@ uint8_t cmd_parser(const char *cmd) {
     return 1;
 
   case CMD_SET_PID: {
+    char target;
     float p, i, d;
-    if (sscanf(param, "%f,%f,%f", &p, &i, &d) == 3) {
-      PID.Kp = p;
-      PID.Ki = i;
-      PID.Kd = d;
-      PID.I = 0; // 重置积分项
+    if (sscanf(param, "%c,%f,%f,%f", &target, &p, &i, &d) == 3) {
+      if (target == 'R') {
+        pid_R.Kp = p;
+        pid_R.Ki = i;
+        pid_R.Kd = d;
 
-      snprintf(response, sizeof(response), "PID:%.3f,%.3f,%.3f", p, i, d);
+        pid_R.I = 0;
+        pid_R.Err = 0;
+        pid_R.Err1 = 0;
+        pid_R.Out = 0;
+      } else if (target == 'L') {
+        pid_L.Kp = p;
+        pid_L.Ki = i;
+        pid_L.Kd = d;
+
+        pid_L.I = 0;
+        pid_L.Err = 0;
+        pid_L.Err1 = 0;
+        pid_L.Out = 0;
+      }
+
+      snprintf(response, sizeof(response), "PID:%c:%.3f,%.3f,%.3f", target, p,
+               i, d);
       msg(MSG_LOG, response);
       return 1;
     } else {

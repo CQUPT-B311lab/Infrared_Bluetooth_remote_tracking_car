@@ -22,10 +22,11 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "COM.h"
-// #include "MPU6050.h"
+#include "MPU6500.h"
 #include "Motor.h"
 // #include "OLED.h"
 #include "PID.h"
+#include "math.h"
 #include "stm32f1xx_hal_gpio.h"
 #include "stm32f1xx_hal_tim.h"
 #include "stm32f1xx_hal_uart.h"
@@ -76,20 +77,24 @@ volatile uint8_t dataFlag = 0;
 
 volatile int16_t M_speed_L = 0;
 volatile int16_t M_speed_R = 0;
-// int16_t M_LastSpeed = 0;
-PID_t PID = {0};
+volatile uint8_t stop_flag = 1;
 
 char float_buf1[20];
 char float_buf2[20];
 char float_buf3[20];
 
 volatile uint8_t print_flag = 0;
-volatile uint8_t stop_flag = 1;
 
+PID_t pid_L;
+PID_t pid_R;
+volatile float target_L = 0;
+volatile float target_R = 0;
 extern uint32_t PID_time;
 float dp = 0, di = 0, dd = 0;
 
 volatile uint8_t TIM4_RCC = 0;
+
+MPU6500_Data mpu_data;
 // extern MPU6050_Angle mpu_angle;
 /* USER CODE END PV */
 
@@ -105,34 +110,47 @@ static void MX_TIM4_Init(void);
 static void MX_TIM2_Init(void);
 static void MX_I2C1_Init(void);
 /* USER CODE BEGIN PFP */
-void Init_BT(uint32_t time_out);
-void conf_PID(float exp);
-void HAL_SYSTICK_Callback(void);
+
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-void conf_PID(float exp) {
-  PID.Exp = exp;
-  PID.Mea = M_speed_L;
-  PID_Updata(&PID);
-}
-
-void fixed_speed_step(void) {
-  PID.Mea = M_speed_L;
-  PID_Updata(&PID);
-  SetSpeed(&htim1, PID.Out);
-}
-
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
-  if (htim->Instance == TIM1) { // 判断是否为 TIM2 中断
+  if (htim->Instance == TIM1) {
   }
   if (htim->Instance == TIM4) {
     TIM4_RCC++;
     if (TIM4_RCC == 10) {
       TIM4_RCC = 0;
-      // MPU6050_Calculate_Angle();
-      // print_flag = 1;
+      M_speed_L = GetSpeed(&htim2);
+      M_speed_R = GetSpeed(&htim3);
+
+      if (stop_flag) {
+        pid_L.I = 0;
+        pid_L.Err = 0;
+        pid_L.Err1 = 0;
+        pid_L.Out = 0;
+        pid_R.I = 0;
+        pid_R.Err = 0;
+        pid_R.Err1 = 0;
+        pid_R.Out = 0;
+
+        SetSpeed(&htim4, 0); // 左轮PWM TIM4
+        SetSpeed(&htim1, 0); // 右轮PWM TIM1
+      } else {
+        pid_L.Exp = target_L;
+        pid_L.Mea = (float)M_speed_L;
+
+        pid_R.Exp = target_R;
+        pid_R.Mea = (float)M_speed_R;
+
+        int16_t outL = (int16_t)PID_Update(&pid_L);
+        int16_t outR = (int16_t)PID_Update(&pid_R);
+
+        SetSpeed(&htim4, outL); // 左轮
+        SetSpeed(&htim1, outR); // 右轮
+      }
+      print_flag = 1;
     }
   }
 }
@@ -179,6 +197,8 @@ int main(void) {
   HAL_UARTEx_ReceiveToIdle_DMA(&huart2, RX_Buf_Active, UART_RX_BUF_LEN);
   // Init_BT(1500); // 这个只需要执行一次去初始化
   // OLED_Init();
+  MPU6500_Init_With_Calibration();
+
   HAL_TIM_Encoder_Start(&htim2, TIM_CHANNEL_ALL);
   HAL_TIM_Encoder_Start(&htim3, TIM_CHANNEL_ALL);
   HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_RESET);
@@ -191,11 +211,20 @@ int main(void) {
   HAL_TIM_Base_Start_IT(&htim1);
   HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_4);
   HAL_TIM_Base_Start_IT(&htim4);
+
+  PID_Init(&pid_L, 8.0f, 0.8f, 0.0f, 999.0f, -999.0f, 400.0f);
+  PID_Init(&pid_R, 8.0f, 0.8f, 0.0f, 999.0f, -999.0f, 400.0f);
+
+  target_L = 0;
+  target_R = 0;
+
+  Motor_Init();
   // MPU6050_Calculate_Angle();
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+  uint8_t log_flag = 0;
   while (1) {
 
     // OLED_ShowString(0, 0, "Motor Monitor", OLED_6X8);
@@ -212,11 +241,19 @@ int main(void) {
     }
     if (print_flag) {
       print_flag = 0;
+      log_flag++;
       // msg_gyroscope(mpu_angle.yaw, mpu_angle.pitch, mpu_angle.roll);
       // msg(MSG_LOG, "000");
+      if (log_flag == 5) {
+        log_flag = 0;
+        COM_StreamTick();
+      }
     }
-    msgf(MSG_LOG, "%d,%d", GetSpeed(&htim2), GetSpeed(&htim3));
-    HAL_Delay(100);
+    MPU6500_Get_All_Data(&mpu_data);
+    msg_gyroscope(mpu_data.yaw, mpu_data.pitch, mpu_data.roll);
+    HAL_Delay(10);
+    // msgf(MSG_LOG, "%d,%d", GetSpeed(&htim2), GetSpeed(&htim3));
+    // HAL_Delay(100);
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -516,7 +553,7 @@ static void MX_TIM4_Init(void) {
 
   /* USER CODE END TIM4_Init 1 */
   htim4.Instance = TIM4;
-  htim4.Init.Prescaler = 72;
+  htim4.Init.Prescaler = 72 - 1;
   htim4.Init.CounterMode = TIM_COUNTERMODE_UP;
   htim4.Init.Period = 1000 - 1;
   htim4.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;

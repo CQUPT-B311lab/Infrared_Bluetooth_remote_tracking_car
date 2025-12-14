@@ -14,7 +14,7 @@ int16_t GetSpeed(TIM_HandleTypeDef *tim) {
   } else {
     speed = -(int16_t)__HAL_TIM_GET_COUNTER(tim);
   }
-  // __HAL_TIM_SET_COUNTER(tim, 0);
+  __HAL_TIM_SET_COUNTER(tim, 0);
   return speed;
 }
 

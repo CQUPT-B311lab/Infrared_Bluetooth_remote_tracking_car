@@ -20,9 +20,10 @@ typedef enum {
 typedef enum {
   // 基本指令
   CMD_OTA = 0,
-  CMD_GO_STRAIGHT = 1,
-  CMD_TURN_LEFT = 2,
-  CMD_TURN_RIGHT = 3,
+  CMD_SET_SPEED = 1,
+  CMD_GO_STRAIGHT = 2,
+  CMD_TURN_LEFT = 3,
+  CMD_TURN_RIGHT = 4,
   // 扩展指令
   CMD_STOP = 10,
   CMD_START = 11,
@@ -46,5 +47,8 @@ void msg_gyroscope(float yaw, float pitch, float roll);
 void msg_acceleration(float x_acc, float y_acc, float z_acc);
 
 uint8_t cmd_parser(const char *cmd);
+
+// 可选连续上报函数
+void COM_StreamTick(void);
 
 #endif
