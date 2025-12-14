@@ -536,7 +536,7 @@ void MPU6500_Get_All_Data(MPU6500_Data *data) {
                         &temp_raw);
 
   // 2. 温度转换
-  data->temp = ((float)temp_raw * 0.002994f) + 21.0f;
+  // data->temp = ((float)temp_raw * 0.002994f) + 21.0f;
 
   // 3. 加速度计数据转换
   data->x_acc = (float)ax_raw * INV_ACCEL_SCALE;

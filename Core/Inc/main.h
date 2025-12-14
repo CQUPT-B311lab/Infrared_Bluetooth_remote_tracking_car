@@ -80,6 +80,10 @@ char *float_to_string(float f, char *buffer, int decimal_places);
 #define ENCODER_PPR 41    // 编码器每转脉冲数
 #define SPEED_SCALE 280.0 // 速度换算系数
 #define PID_PERIOD_MS 10  // PID控制周期(ms)
+
+#define PWM_MAX 999
+#define PWM_MIN_START 120
+#define TARGET_LIMIT 150.0f
 /* USER CODE END Private defines */
 
 #ifdef __cplusplus

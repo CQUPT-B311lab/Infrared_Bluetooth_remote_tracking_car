@@ -89,10 +89,11 @@ PID_t pid_L;
 PID_t pid_R;
 volatile float target_L = 0;
 volatile float target_R = 0;
-extern uint32_t PID_time;
-float dp = 0, di = 0, dd = 0;
+PID_t pid_yaw;
+volatile float target_Y = 0;
 
 volatile uint8_t TIM4_RCC = 0;
+volatile uint8_t TIM1_RCC = 0;
 
 MPU6500_Data mpu_data;
 // extern MPU6050_Angle mpu_angle;
@@ -110,22 +111,30 @@ static void MX_TIM4_Init(void);
 static void MX_TIM2_Init(void);
 static void MX_I2C1_Init(void);
 /* USER CODE BEGIN PFP */
-
+static inline float clampf(float x, float minv, float maxv);
+static inline int16_t apply_pwm_min_start(int16_t u, int16_t pwm_min);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
   if (htim->Instance == TIM1) {
+    TIM1_RCC++;
+    if (TIM1_RCC == 10) {
+      TIM1_RCC = 0;
+      MPU6500_Get_All_Data(&mpu_data);
+    }
   }
   if (htim->Instance == TIM4) {
     TIM4_RCC++;
     if (TIM4_RCC == 10) {
       TIM4_RCC = 0;
-      M_speed_L = GetSpeed(&htim2);
-      M_speed_R = GetSpeed(&htim3);
+      M_speed_L = GetSpeed(&htim2); // 脉冲/10ms
+      M_speed_R = GetSpeed(&htim3); // 脉冲/10ms
+      float yaw_now = mpu_data.yaw;
 
       if (stop_flag) {
+        // 清状态，防止再启动猛冲
         pid_L.I = 0;
         pid_L.Err = 0;
         pid_L.Err1 = 0;
@@ -134,18 +143,50 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
         pid_R.Err = 0;
         pid_R.Err1 = 0;
         pid_R.Out = 0;
+        pid_yaw.I = 0;
+        pid_yaw.Err = 0;
+        pid_yaw.Err1 = 0;
+        pid_yaw.Out = 0;
 
-        SetSpeed(&htim4, 0); // 左轮PWM TIM4
-        SetSpeed(&htim1, 0); // 右轮PWM TIM1
+        SetSpeed(&htim4, 0);
+        SetSpeed(&htim1, 0);
       } else {
-        pid_L.Exp = target_L;
+        // 目标限幅：避免不可能达到的设定导致长时间饱和
+        float tL = clampf(target_L, -TARGET_LIMIT, TARGET_LIMIT);
+        float tR = clampf(target_R, -TARGET_LIMIT, TARGET_LIMIT);
+
+        pid_L.Exp = tL;
         pid_L.Mea = (float)M_speed_L;
 
-        pid_R.Exp = target_R;
+        pid_R.Exp = tR;
         pid_R.Mea = (float)M_speed_R;
+
+        pid_yaw.Exp = target_Y;
+        pid_yaw.Mea = yaw_now;
 
         int16_t outL = (int16_t)PID_Update(&pid_L);
         int16_t outR = (int16_t)PID_Update(&pid_R);
+
+        float yaw_correction = PID_Update(&pid_yaw);
+
+        target_R = outR + yaw_correction / 2.0f;
+        target_L = outL - yaw_correction / 2.0f;
+
+        // 最小启动PWM：只有当“目标不为0”时才强制最小PWM
+        if (tL != 0.0f)
+          outL = apply_pwm_min_start(outL, PWM_MIN_START);
+        if (tR != 0.0f)
+          outR = apply_pwm_min_start(outR, PWM_MIN_START);
+
+        // 最后再保险限幅
+        if (outL > PWM_MAX)
+          outL = PWM_MAX;
+        if (outL < -PWM_MAX)
+          outL = -PWM_MAX;
+        if (outR > PWM_MAX)
+          outR = PWM_MAX;
+        if (outR < -PWM_MAX)
+          outR = -PWM_MAX;
 
         SetSpeed(&htim4, outL); // 左轮
         SetSpeed(&htim1, outR); // 右轮
@@ -212,8 +253,9 @@ int main(void) {
   HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_4);
   HAL_TIM_Base_Start_IT(&htim4);
 
-  PID_Init(&pid_L, 8.0f, 0.8f, 0.0f, 999.0f, -999.0f, 400.0f);
-  PID_Init(&pid_R, 8.0f, 0.8f, 0.0f, 999.0f, -999.0f, 400.0f);
+  PID_Init(&pid_L, 170.0f, 20.0f, 5.0f, 999.0f, -999.0f, 400.0f);
+  PID_Init(&pid_R, 150.0f, 15.0f, 5.0f, 999.0f, -999.0f, 400.0f);
+  PID_Init(&pid_yaw, 50.0f, 0.0f, 1.0f, 999.0f, -999.0f, 400.0f);
 
   target_L = 0;
   target_R = 0;
@@ -224,7 +266,9 @@ int main(void) {
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  uint8_t log_flag = 0;
+  // target_L = 3;
+  // target_R = 3;
+  // stop_flag = 0;
   while (1) {
 
     // OLED_ShowString(0, 0, "Motor Monitor", OLED_6X8);
@@ -241,20 +285,16 @@ int main(void) {
     }
     if (print_flag) {
       print_flag = 0;
-      log_flag++;
-      // msg_gyroscope(mpu_angle.yaw, mpu_angle.pitch, mpu_angle.roll);
-      // msg(MSG_LOG, "000");
-      if (log_flag == 5) {
-        log_flag = 0;
-        COM_StreamTick();
-      }
+      msgf(MSG_LOG, "%d,%d", (int)target_R, (int)M_speed_R);
     }
-    MPU6500_Get_All_Data(&mpu_data);
-    msg_gyroscope(mpu_data.yaw, mpu_data.pitch, mpu_data.roll);
-    HAL_Delay(10);
+    // MPU6500_Get_All_Data(&mpu_data);
+    // msg_gyroscope(mpu_data.yaw, mpu_data.pitch, mpu_data.roll);
+    // HAL_Delay(10);
     // msgf(MSG_LOG, "%d,%d", GetSpeed(&htim2), GetSpeed(&htim3));
     // HAL_Delay(100);
     /* USER CODE END WHILE */
+    // HAL_Delay(1000);
+    // stop_flag = 1;
 
     /* USER CODE BEGIN 3 */
   }
@@ -507,7 +547,7 @@ static void MX_TIM3_Init(void) {
 
   /* USER CODE END TIM3_Init 1 */
   htim3.Instance = TIM3;
-  htim3.Init.Prescaler = 4 - 1;
+  htim3.Init.Prescaler = 2 - 1;
   htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
   htim3.Init.Period = 65535;
   htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
@@ -769,6 +809,24 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size) {
 
     HAL_UARTEx_ReceiveToIdle_DMA(&huart2, RX_Buf_Active, UART_RX_BUF_LEN);
   }
+}
+
+static inline float clampf(float x, float minv, float maxv) {
+  if (x > maxv)
+    return maxv;
+  if (x < minv)
+    return minv;
+  return x;
+}
+
+static inline int16_t apply_pwm_min_start(int16_t u, int16_t pwm_min) {
+  if (u == 0)
+    return 0;
+  if (u > 0 && u < pwm_min)
+    return pwm_min;
+  if (u < 0 && u > -pwm_min)
+    return -pwm_min;
+  return u;
 }
 
 void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart) {

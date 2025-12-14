@@ -7,9 +7,9 @@
 #include "stdlib.h"
 #include "stm32f1xx_hal_uart.h"
 #include "string.h"
+#include <sys/_intsup.h>
 
 extern UART_HandleTypeDef huart2;
-
 extern TIM_HandleTypeDef htim1;
 extern TIM_HandleTypeDef htim2;
 extern TIM_HandleTypeDef htim3;
@@ -17,21 +17,33 @@ extern TIM_HandleTypeDef htim4;
 
 extern volatile uint8_t print_flag;
 extern volatile uint8_t stop_flag;
-
-extern PID_t PID;
-
 extern volatile int16_t M_speed_L;
 extern volatile int16_t M_speed_R;
 
-extern volatile float target_L;
-extern volatile float target_R;
+extern volatile float target_L; // 单位：脉冲/10ms
+extern volatile float target_R; // 单位：脉冲/10ms
 
 extern PID_t pid_L;
 extern PID_t pid_R;
 
-// 通信消息格式化（也便于vofa解析）：#消息类型|长度:内容\n
-//                                   ^数字   ^数字
+/* ========================= 工具函数 ========================= */
 
+#ifndef COM_TX_BUF_SIZE
+#define COM_TX_BUF_SIZE 160
+#endif
+
+static void trim_newline(char *str) {
+  size_t len = strlen(str);
+  while (len > 0 && (str[len - 1] == '\n' || str[len - 1] == '\r')) {
+    str[--len] = '\0';
+  }
+}
+
+/* 发送忙判断：DMA在发送时避免覆盖/乱序。此处用UART状态做轻量保护 */
+static uint8_t uart2_tx_ready(void) {
+  return (huart2.gState == HAL_UART_STATE_READY) ? 1 : 0;
+}
+/* ========================= 消息发送 ========================= */
 /**
  * @brief 向上位机发送格式化消息
  * @param msg_id 消息类型枚举
@@ -40,46 +52,51 @@ extern PID_t pid_R;
  * @note 格式: #消息ID|长度:内容\n
  */
 uint8_t msg(UART_MSG_ID_t msg_id, const char *info) {
-  if (info == NULL) {
+  if (info == NULL)
+    return 0;
+
+  if (!uart2_tx_ready()) {
+    // 忙则丢弃（也可改为阻塞发送/排队）
     return 0;
   }
 
-  char tx_buffer[128];
+  static char tx_buffer[COM_TX_BUF_SIZE];
   size_t info_len = strlen(info);
 
-  // 格式化消息: #ID|LEN:INFO\n
   int total_len = snprintf(tx_buffer, sizeof(tx_buffer), "#%d|%d:%s\n",
                            (int)msg_id, (int)info_len, info);
-
-  // 检查缓冲区溢出
   if (total_len < 0 || total_len >= (int)sizeof(tx_buffer)) {
-    // 发送错误消息（手动构造避免递归）
     const char *overflow_msg = "#2|18:MSG_BUFFER_OVERFLOW\n";
-    HAL_UART_Transmit_DMA(&huart2, (uint8_t *)overflow_msg,
-                          strlen(overflow_msg));
+    if (uart2_tx_ready()) {
+      HAL_UART_Transmit_DMA(&huart2, (uint8_t *)overflow_msg,
+                            (uint16_t)strlen(overflow_msg));
+    }
     return 0;
   }
 
-  // 发送消息
-  HAL_StatusTypeDef status =
-      HAL_UART_Transmit_DMA(&huart2, (uint8_t *)tx_buffer, total_len);
-  return (status == HAL_OK) ? 1 : 0;
+  return (HAL_UART_Transmit_DMA(&huart2, (uint8_t *)tx_buffer,
+                                (uint16_t)total_len) == HAL_OK)
+             ? 1
+             : 0;
 }
 
 /**
  * @brief 向上位机发送带格式的格式化消息
  * @param msg_id 消息类型枚举
- * @param ··· 参数列表
  * @param format 指定要显示的格式化字符串
+ * @param ... 参数
  * @retval 1:成功 0:失败
  */
 uint8_t msgf(UART_MSG_ID_t msg_id, char *format, ...) {
-  char String[128];      // 定义字符数组
-  va_list arg;           // 定义可变参数列表数据类型的变量arg
-  va_start(arg, format); // 从format开始，接收参数列表到arg变量
-  vsprintf(String, format,
-           arg); // 使用vsprintf打印格式化字符串和参数列表到字符数组中
-  va_end(arg);   // 结束变量arg
+  if (format == NULL)
+    return 0;
+
+  char String[128];
+  va_list arg;
+  va_start(arg, format);
+  vsnprintf(String, sizeof(String), format, arg);
+  va_end(arg);
+
   return msg(msg_id, String);
 }
 
@@ -87,25 +104,23 @@ uint8_t msgf(UART_MSG_ID_t msg_id, char *format, ...) {
  * @brief 发送速度数据的快速函数
  * @param speed_L 左轮速度
  * @param speed_R 右轮速度
- * @param target 目标速度
+ * @param target 目标速度（同单位）
  */
 void msg_speed(float speed_L, float speed_R, float target) {
-  char buf[48];
+  char buf[64];
   snprintf(buf, sizeof(buf), "%.2f,%.2f,%.2f", speed_L, speed_R, target);
   msg(MSG_SPEED, buf);
 }
 
 /**
  * @brief 发送陀螺仪数据的快速函数
- * @param yaw 偏航角
- * @param pitch 俯仰角
- * @param roll 翻滚角
  */
 void msg_gyroscope(float yaw, float pitch, float roll) {
-  char buf[48] = {'\0'};
-  char buf1[8] = {'\0'};
-  char buf2[8] = {'\0'};
-  char buf3[8] = {'\0'};
+  char buf[64] = {'\0'};
+  char buf1[16] = {'\0'};
+  char buf2[16] = {'\0'};
+  char buf3[16] = {'\0'};
+
   snprintf(buf, sizeof(buf), "%s,%s,%s", float_to_string(yaw, buf1, 2),
            float_to_string(pitch, buf2, 2), float_to_string(roll, buf3, 2));
   msg(MSG_GYROSCOPE, buf);
@@ -113,141 +128,146 @@ void msg_gyroscope(float yaw, float pitch, float roll) {
 
 /**
  * @brief 发送加速度仪数据的快速函数
- * @param x_acc x加速度
- * @param y_acc y加速度
- * @param z_acc z加速度
  */
 void msg_acceleration(float x_acc, float y_acc, float z_acc) {
-  char buf[48] = {'\0'};
-  char buf1[8] = {'\0'};
-  char buf2[8] = {'\0'};
-  char buf3[8] = {'\0'};
+  char buf[64] = {'\0'};
+  char buf1[16] = {'\0'};
+  char buf2[16] = {'\0'};
+  char buf3[16] = {'\0'};
+
   snprintf(buf, sizeof(buf), "%s,%s,%s", float_to_string(x_acc, buf1, 2),
            float_to_string(y_acc, buf2, 2), float_to_string(z_acc, buf3, 2));
   msg(MSG_ACCELERATION, buf);
 }
 
 /**
- * @brief 去除字符串末尾的换行符
+ * @brief 周期性串口流输出
+ * @note 单位：脉冲/10ms
  */
-static void trim_newline(char *str) {
-  size_t len = strlen(str);
-  while (len > 0 && (str[len - 1] == '\n' || str[len - 1] == '\r')) {
-    str[--len] = '\0';
-  }
+void COM_StreamTick(void) {
+  // 例：输出测量与目标（脉冲/10ms）
+  msgf(MSG_LOG, "measL:%d,measR:%d,tL:%.1f,tR:%.1f", (int)M_speed_L,
+       (int)M_speed_R, target_L, target_R);
 }
 
+/* ========================= 指令解析 ========================= */
 /**
  * @brief 解析上位机指令
  * @param cmd 指令字符串
  * @retval 1:解析成功 0:解析失败
- * @note 格式: #指令ID:参数\n 或 #指令ID\n
+ * @note 格式:
+ *   - 无参数: #ID
+ *   - 有参数: #ID:PARAM
+ *
+ * 建议参数格式：
+ *   CMD_SET_SPEED / CMD_GO_STRAIGHT:  #<id>:<v>            (v=脉冲/10ms)
+ *   设左右轮不同目标：                #<id>:L,R             (L,R=脉冲/10ms)
+ *   CMD_SET_PID:                      #<id>:L,kp,ki,kd 或 R,kp,ki,kd
  */
 uint8_t cmd_parser(const char *cmd) {
-  if (cmd == NULL || cmd[0] != '#') {
+  if (cmd == NULL || cmd[0] != '#')
     return 0;
-  }
 
-  // 复制到本地缓冲区处理
   char cmd_buf[64];
   strncpy(cmd_buf, cmd, sizeof(cmd_buf) - 1);
   cmd_buf[sizeof(cmd_buf) - 1] = '\0';
   trim_newline(cmd_buf);
 
-  // 解析指令ID和参数
   int cmd_id = -1;
-  char param[32] = {0};
+  char param[40] = {0};
 
-  // 查找冒号
   char *colon_ptr = strchr(cmd_buf, ':');
-
   if (colon_ptr == NULL) {
-    // 无参数指令: #ID
     if (sscanf(cmd_buf, "#%d", &cmd_id) != 1) {
       msg(MSG_ERROR, "Invalid cmd format");
       return 0;
     }
   } else {
-    // 有参数指令: #ID:PARAM
-    *colon_ptr = '\0'; // 分割字符串
+    *colon_ptr = '\0';
     if (sscanf(cmd_buf, "#%d", &cmd_id) != 1) {
       msg(MSG_ERROR, "Invalid cmd ID");
       return 0;
     }
     strncpy(param, colon_ptr + 1, sizeof(param) - 1);
+    trim_newline(param);
   }
 
-  // 根据指令ID处理
-  char response[64];
+  char response[96];
 
   switch ((UART_CMD_ID_t)cmd_id) {
-
   case CMD_OTA:
     msg(MSG_OTA, "Entering OTA mode");
     // TODO: 跳转到Bootloader
     return 1;
 
   case CMD_SET_SPEED: {
+    // 支持两种格式：
+    //  1) #ID:30        -> L=30,R=30
+    //  2) #ID:30,28     -> L=30,R=28
     if (strlen(param) == 0) {
-      msg(MSG_ERROR, "GO_STRAIGHT needs speed");
+      msg(MSG_ERROR, "SET_SPEED needs param");
       return 0;
     }
-    float speed = atof(param);
 
-    target_L = speed;
-    target_R = speed;
+    float l = 0, r = 0;
+    int n = sscanf(param, "%f,%f", &l, &r);
+    if (n == 1) {
+      target_L = l;
+      target_R = l;
+    } else if (n == 2) {
+      target_L = l;
+      target_R = r;
+    } else {
+      msg(MSG_ERROR, "SET_SPEED format:v or vL,vR");
+      return 0;
+    }
 
+    snprintf(response, sizeof(response), "SetSpeed L=%.1f R=%.1f(pulse/10ms)",
+             target_L, target_R);
+    msg(MSG_LOG, response);
     return 1;
   }
+
   case CMD_GO_STRAIGHT: {
     if (strlen(param) == 0) {
       msg(MSG_ERROR, "GO_STRAIGHT needs speed");
       return 0;
     }
     float speed = atof(param);
-
-    // 设置PID目标速度
     target_L = speed;
     target_R = speed;
     stop_flag = 0;
-
-    // 两轮同向同速（直行）
-    // 注意：实际控制由PID在定时器中断中完成
-
-    snprintf(response, sizeof(response), "Straight:%.2f", speed);
+    snprintf(response, sizeof(response), "Straight:%.1f(pulse/10ms)", speed);
     msg(MSG_LOG, response);
     return 1;
   }
 
   case CMD_TURN_LEFT: {
-    float angle = strlen(param) > 0 ? atof(param) : 45.0f;
+    // 对速度闭环项目：转向也建议走“目标速度差速”，不要直接 SetSpeed(PWM)。
+    // 这里用“左慢右快”的目标，默认幅度可由 param 指定（脉冲/10ms）。
+    float v = (strlen(param) > 0) ? atof(param) : 30.0f;
     stop_flag = 0;
-
-    // 差速转向：左轮慢/反转，右轮快
-    // 这里直接设置PWM，不经过PID
-    SetSpeed(&htim1, -50); // 左轮
-    SetSpeed(&htim4, 150); // 右轮
-
-    snprintf(response, sizeof(response), "TurnL:%.1f", angle);
+    target_L = -v;
+    target_R = v;
+    snprintf(response, sizeof(response), "TurnL v=%.1f(pulse/10ms)", v);
     msg(MSG_LOG, response);
     return 1;
   }
 
   case CMD_TURN_RIGHT: {
-    float angle = strlen(param) > 0 ? atof(param) : 45.0f;
+    float v = (strlen(param) > 0) ? atof(param) : 30.0f;
     stop_flag = 0;
-
-    // 差速转向：左轮快，右轮慢/反转
-    SetSpeed(&htim1, 150); // 左轮
-    SetSpeed(&htim4, -50); // 右轮
-
-    snprintf(response, sizeof(response), "TurnR:%.1f", angle);
+    target_L = v;
+    target_R = -v;
+    snprintf(response, sizeof(response), "TurnR v=%.1f(pulse/10ms)", v);
     msg(MSG_LOG, response);
     return 1;
   }
 
   case CMD_STOP:
     stop_flag = 1;
+    target_L = 0;
+    target_R = 0;
     msg(MSG_LOG, "STOPPED");
     return 1;
 
@@ -257,70 +277,108 @@ uint8_t cmd_parser(const char *cmd) {
     return 1;
 
   case CMD_SET_PID: {
-    char target;
-    float p, i, d;
-    if (sscanf(param, "%c,%f,%f,%f", &target, &p, &i, &d) == 3) {
-      if (target == 'R') {
-        pid_R.Kp = p;
-        pid_R.Ki = i;
-        pid_R.Kd = d;
+    // 期望格式：L,kp,ki,kd 或 R,kp,ki,kd
+    char side = 0;
+    int p = 0, i = 0, d = 0;
 
-        pid_R.I = 0;
-        pid_R.Err = 0;
-        pid_R.Err1 = 0;
-        pid_R.Out = 0;
-      } else if (target == 'L') {
-        pid_L.Kp = p;
-        pid_L.Ki = i;
-        pid_L.Kd = d;
-
-        pid_L.I = 0;
-        pid_L.Err = 0;
-        pid_L.Err1 = 0;
-        pid_L.Out = 0;
-      }
-
-      snprintf(response, sizeof(response), "PID:%c:%.3f,%.3f,%.3f", target, p,
-               i, d);
-      msg(MSG_LOG, response);
-      return 1;
-    } else {
-      msg(MSG_ERROR, "PID format:P,I,D");
+    int n = sscanf(param, "%c,%d,%d,%d", &side, &p, &i, &d);
+    if (n != 4) {
+      msg(MSG_ERROR, "PID format:L,kp,ki,kd");
       return 0;
     }
+
+    PID_t *pid = NULL;
+    if (side == 'L' || side == 'l')
+      pid = &pid_L;
+    if (side == 'R' || side == 'r')
+      pid = &pid_R;
+    if (pid == NULL) {
+      msg(MSG_ERROR, "PID side must be L/R");
+      return 0;
+    }
+
+    pid->Kp = p;
+    pid->Ki = i;
+    pid->Kd = d;
+
+    // 清状态，避免参数切换引发冲击
+    pid->I = 0;
+    pid->Err = 0;
+    pid->Err1 = 0;
+    pid->Out = 0;
+
+    snprintf(response, sizeof(response), "PID %c=%d,%d,%d       ", side, p, i,
+             d);
+    msg(MSG_LOG, response);
+    return 1;
+  }
+
+  case CMD_GET_PID: {
+    if (strlen(param) == 0) {
+      msg(MSG_ERROR, "SET_SPEED needs param");
+      return 0;
+    }
+    char target;
+    sscanf(param, "%c", &target);
+    char float_buf1[8];
+    char float_buf2[8];
+    char float_buf3[8];
+    PID_t *pid = NULL;
+    if (target == 'L') {
+      pid = &pid_L;
+    }
+    if (target == 'R') {
+      pid = &pid_R;
+    }
+    msgf(MSG_LOG, "P:%s, I:%s, D:%s", float_to_string(pid->Kp, float_buf1, 2),
+         float_to_string(pid->Ki, float_buf2, 2),
+         float_to_string(pid->Kd, float_buf3, 2));
+    return 1;
   }
 
   case CMD_GET_SPEED: {
-    float speed_L = (float)M_speed_L / ENCODER_PPR * SPEED_SCALE;
-    float speed_R = (float)M_speed_R / ENCODER_PPR * SPEED_SCALE;
-    float target = PID.Exp / ENCODER_PPR * SPEED_SCALE;
-
-    msg_speed(speed_L, speed_R, target);
+    // 你已明确目标单位为“脉冲/10ms”，这里直接回传原始测量与目标
+    // 也可同时给出换算后的rps/rpm，若你后续需要再加。
+    msgf(MSG_SPEED, "%d,%d,%.1f,%.1f", (int)M_speed_L, (int)M_speed_R, target_L,
+         target_R);
+    // 格式：measL,measR,targetL,targetR
     return 1;
   }
 
   case CMD_SET_TARGET_SPEED: {
+    // 保留该命令：按你的要求也用“脉冲/10ms”
     if (strlen(param) == 0) {
       msg(MSG_ERROR, "Need target speed");
       return 0;
     }
-    float target = atof(param);
-    // 将实际速度转换为脉冲数
-    PID.Exp = target / SPEED_SCALE * ENCODER_PPR;
-
-    snprintf(response, sizeof(response), "Target:%.2f", target);
+    float t = atof(param);
+    stop_flag = 1;
+    target_L = t;
+    target_R = t;
+    snprintf(response, sizeof(response), "Target:%.1f(pulse/10ms)", t);
     msg(MSG_LOG, response);
     return 1;
   }
-  case CMD_PING: {
+
+  case CMD_PING:
     msg(MSG_LOG, "Ack Ping");
+    return 1;
+
+  case CMD_RESET_PID: {
+    __disable_irq();
+    pid_L.I = pid_L.Err = pid_L.Err1 = pid_L.Out = 0;
+    pid_R.I = pid_R.Err = pid_R.Err1 = pid_R.Out = 0;
+    __enable_irq();
+    HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_RESET);
+    HAL_Delay(200);
+    HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_SET);
+    msg(MSG_LOG, "PID reset");
     return 1;
   }
 
-  default: {
+  default:
     snprintf(response, sizeof(response), "Unknown CMD:%d", cmd_id);
     msg(MSG_ERROR, response);
     return 0;
-  }
   }
 }
