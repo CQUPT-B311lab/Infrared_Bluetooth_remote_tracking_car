@@ -22,9 +22,9 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "COM.h"
-#include "MPU6500.h"
+// #include "MPU6050.h"
 #include "Motor.h"
-#include "OLED.h"
+// #include "OLED.h"
 #include "PID.h"
 #include "stm32f1xx_hal_gpio.h"
 #include "stm32f1xx_hal_tim.h"
@@ -43,6 +43,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+#define UART_RX_BUF_LEN 64
 // #define LOOP_TEST
 // #define READ_TEMPLE
 /* USER CODE END PD */
@@ -55,7 +56,7 @@
 /* Private variables ---------------------------------------------------------*/
 ADC_HandleTypeDef hadc1;
 
-SPI_HandleTypeDef hspi1;
+I2C_HandleTypeDef hi2c1;
 
 TIM_HandleTypeDef htim1;
 TIM_HandleTypeDef htim2;
@@ -88,8 +89,8 @@ volatile uint8_t stop_flag = 1;
 extern uint32_t PID_time;
 float dp = 0, di = 0, dd = 0;
 
-volatile uint32_t sys_tick_counter = 0;
-
+volatile uint8_t TIM4_RCC = 0;
+// extern MPU6050_Angle mpu_angle;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -98,11 +99,11 @@ static void MX_GPIO_Init(void);
 static void MX_DMA_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_ADC1_Init(void);
-static void MX_SPI1_Init(void);
 static void MX_TIM1_Init(void);
 static void MX_TIM3_Init(void);
 static void MX_TIM4_Init(void);
 static void MX_TIM2_Init(void);
+static void MX_I2C1_Init(void);
 /* USER CODE BEGIN PFP */
 void Init_BT(uint32_t time_out);
 void conf_PID(float exp);
@@ -123,22 +124,15 @@ void fixed_speed_step(void) {
   SetSpeed(&htim1, PID.Out);
 }
 
-void OLED_Show_Data(void) {
-  OLED_ShowString(0, 0, "Motor Mointor", OLED_6X8);
-  OLED_Printf(0, 8, OLED_6X8, "Speed:%s",
-              float_to_string((float)M_speed_L, float_buf1, 5));
-  OLED_Update();
-}
-
-void HAL_SYSTICK_Callback(void) {
-  sys_tick_counter++;
-  if (sys_tick_counter >= 10) {
-    if (!stop_flag) {
-      print_flag = 1;
-      M_speed_L = GetSpeed(&htim3);
-      M_speed_R = GetSpeed(&htim2);
-      fixed_speed_step();
-      sys_tick_counter = 0;
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
+  if (htim->Instance == TIM1) { // 判断是否为 TIM2 中断
+  }
+  if (htim->Instance == TIM4) {
+    TIM4_RCC++;
+    if (TIM4_RCC == 10) {
+      TIM4_RCC = 0;
+      // MPU6050_Calculate_Angle();
+      // print_flag = 1;
     }
   }
 }
@@ -176,26 +170,33 @@ int main(void) {
   MX_DMA_Init();
   MX_USART2_UART_Init();
   MX_ADC1_Init();
-  MX_SPI1_Init();
   MX_TIM1_Init();
   MX_TIM3_Init();
   MX_TIM4_Init();
   MX_TIM2_Init();
+  MX_I2C1_Init();
   /* USER CODE BEGIN 2 */
   HAL_UARTEx_ReceiveToIdle_DMA(&huart2, RX_Buf_Active, UART_RX_BUF_LEN);
   // Init_BT(1500); // 这个只需要执行一次去初始化
   // OLED_Init();
-  MPU6500_Init();
   HAL_TIM_Encoder_Start(&htim2, TIM_CHANNEL_ALL);
   HAL_TIM_Encoder_Start(&htim3, TIM_CHANNEL_ALL);
-  HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_SET);
+  HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_RESET);
+
+  // if (MPU6050_Init() == 0) {
+  //   Error_Handler();
+  // }
+
+  HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
+  HAL_TIM_Base_Start_IT(&htim1);
+  HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_4);
+  HAL_TIM_Base_Start_IT(&htim4);
+  // MPU6050_Calculate_Angle();
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  MPU6500_Data sensor_data;
   while (1) {
-    MPU6500_Get_All_Data(&sensor_data);
 
     // OLED_ShowString(0, 0, "Motor Monitor", OLED_6X8);
     // OLED_Printf(16, 0, OLED_6X8, "Roll:%.2f, Pitch:%.2f, Yaw:%.2f
@@ -208,22 +209,13 @@ int main(void) {
         if (!cmd_parser((char *)RX_Buf_Ready)) {
         }
       }
-      if (print_flag) {
-        print_flag = 0;
-
-        // 将速度转换为实际速度（假设转换公式为：速度 =  (脉冲数/41.0)*280.0）
-        // float current_speed_L = (float)M_speed_L / ENCODER_PPR * SPEED_SCALE;
-        // float exp_speed = PID.Exp / 41.0 * 280.0; // 假设PID.Exp是目标脉冲数
-
-        // // 打印当前速度和目标速度
-        // printf("%s,%s\r\n", float_to_string(current_speed_L, float_buf1, 5),
-        //        float_to_string(exp_speed, float_buf2, 5));
-      }
     }
-    // msg_gyroscope(sensor_data.yaw, sensor_data.pitch, sensor_data.roll);
-    // msg_acceleration(sensor_data.x_acc, sensor_data.y_acc,
-    // sensor_data.z_acc);
-    msgf(MSG_LOG, "%d, %d", GetSpeed(&htim2), GetSpeed(&htim3));
+    if (print_flag) {
+      print_flag = 0;
+      // msg_gyroscope(mpu_angle.yaw, mpu_angle.pitch, mpu_angle.roll);
+      // msg(MSG_LOG, "000");
+    }
+    msgf(MSG_LOG, "%d,%d", GetSpeed(&htim2), GetSpeed(&htim3));
     HAL_Delay(100);
     /* USER CODE END WHILE */
 
@@ -318,38 +310,34 @@ static void MX_ADC1_Init(void) {
 }
 
 /**
- * @brief SPI1 Initialization Function
+ * @brief I2C1 Initialization Function
  * @param None
  * @retval None
  */
-static void MX_SPI1_Init(void) {
+static void MX_I2C1_Init(void) {
 
-  /* USER CODE BEGIN SPI1_Init 0 */
+  /* USER CODE BEGIN I2C1_Init 0 */
 
-  /* USER CODE END SPI1_Init 0 */
+  /* USER CODE END I2C1_Init 0 */
 
-  /* USER CODE BEGIN SPI1_Init 1 */
+  /* USER CODE BEGIN I2C1_Init 1 */
 
-  /* USER CODE END SPI1_Init 1 */
-  /* SPI1 parameter configuration*/
-  hspi1.Instance = SPI1;
-  hspi1.Init.Mode = SPI_MODE_MASTER;
-  hspi1.Init.Direction = SPI_DIRECTION_2LINES;
-  hspi1.Init.DataSize = SPI_DATASIZE_8BIT;
-  hspi1.Init.CLKPolarity = SPI_POLARITY_HIGH;
-  hspi1.Init.CLKPhase = SPI_PHASE_2EDGE;
-  hspi1.Init.NSS = SPI_NSS_SOFT;
-  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_128;
-  hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
-  hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
-  hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
-  hspi1.Init.CRCPolynomial = 10;
-  if (HAL_SPI_Init(&hspi1) != HAL_OK) {
+  /* USER CODE END I2C1_Init 1 */
+  hi2c1.Instance = I2C1;
+  hi2c1.Init.ClockSpeed = 100000;
+  hi2c1.Init.DutyCycle = I2C_DUTYCYCLE_2;
+  hi2c1.Init.OwnAddress1 = 0;
+  hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
+  hi2c1.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
+  hi2c1.Init.OwnAddress2 = 0;
+  hi2c1.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
+  hi2c1.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
+  if (HAL_I2C_Init(&hi2c1) != HAL_OK) {
     Error_Handler();
   }
-  /* USER CODE BEGIN SPI1_Init 2 */
+  /* USER CODE BEGIN I2C1_Init 2 */
 
-  /* USER CODE END SPI1_Init 2 */
+  /* USER CODE END I2C1_Init 2 */
 }
 
 /**
@@ -363,6 +351,7 @@ static void MX_TIM1_Init(void) {
 
   /* USER CODE END TIM1_Init 0 */
 
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
   TIM_MasterConfigTypeDef sMasterConfig = {0};
   TIM_OC_InitTypeDef sConfigOC = {0};
   TIM_BreakDeadTimeConfigTypeDef sBreakDeadTimeConfig = {0};
@@ -373,10 +362,17 @@ static void MX_TIM1_Init(void) {
   htim1.Instance = TIM1;
   htim1.Init.Prescaler = 72 - 1;
   htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim1.Init.Period = 800 - 1;
+  htim1.Init.Period = 1000 - 1;
   htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim1.Init.RepetitionCounter = 0;
   htim1.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim1) != HAL_OK) {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim1, &sClockSourceConfig) != HAL_OK) {
+    Error_Handler();
+  }
   if (HAL_TIM_PWM_Init(&htim1) != HAL_OK) {
     Error_Handler();
   }
@@ -512,6 +508,7 @@ static void MX_TIM4_Init(void) {
 
   /* USER CODE END TIM4_Init 0 */
 
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
   TIM_MasterConfigTypeDef sMasterConfig = {0};
   TIM_OC_InitTypeDef sConfigOC = {0};
 
@@ -521,9 +518,16 @@ static void MX_TIM4_Init(void) {
   htim4.Instance = TIM4;
   htim4.Init.Prescaler = 72;
   htim4.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim4.Init.Period = 800 - 1;
+  htim4.Init.Period = 1000 - 1;
   htim4.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim4.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim4) != HAL_OK) {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim4, &sClockSourceConfig) != HAL_OK) {
+    Error_Handler();
+  }
   if (HAL_TIM_PWM_Init(&htim4) != HAL_OK) {
     Error_Handler();
   }
@@ -609,27 +613,24 @@ static void MX_GPIO_Init(void) {
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOA, SPI_NSS_Pin | LED_Pin, GPIO_PIN_SET);
+  HAL_GPIO_WritePin(GPIOA, BIN2_Pin | STBY_Pin | AIN2_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(
-      GPIOB, SDA_Pin | SCL_Pin | AIN2_Pin | AIN1_Pin | BIN2_Pin | BIN1_Pin,
-      GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOB, SDA_Pin | SCL_Pin | AIN1_Pin | BIN1_Pin,
+                    GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(STBY_GPIO_Port, STBY_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_SET);
 
-  /*Configure GPIO pins : SPI_NSS_Pin LED_Pin STBY_Pin */
-  GPIO_InitStruct.Pin = SPI_NSS_Pin | LED_Pin | STBY_Pin;
+  /*Configure GPIO pins : BIN2_Pin STBY_Pin LED_Pin AIN2_Pin */
+  GPIO_InitStruct.Pin = BIN2_Pin | STBY_Pin | LED_Pin | AIN2_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : SDA_Pin SCL_Pin AIN2_Pin AIN1_Pin
-                           BIN2_Pin BIN1_Pin */
-  GPIO_InitStruct.Pin =
-      SDA_Pin | SCL_Pin | AIN2_Pin | AIN1_Pin | BIN2_Pin | BIN1_Pin;
+  /*Configure GPIO pins : SDA_Pin SCL_Pin AIN1_Pin BIN1_Pin */
+  GPIO_InitStruct.Pin = SDA_Pin | SCL_Pin | AIN1_Pin | BIN1_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;

@@ -46,21 +46,21 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user sources here
     Lib/Motor/Src/Motor.c
-    Lib/OLED_JX/Src/OLED.c
-    Lib/OLED_JX/Src/OLED_Data.c
+    # Lib/OLED_JX/Src/OLED.c
+    # Lib/OLED_JX/Src/OLED_Data.c
     Lib/PID/Src/PID.c
     Lib/COM/Src/COM.c
-    Lib/MPU6500/Src/MPU6500.c
+    Lib/MPU6050/Src/MPU6050.c
 )
 
 # Add include paths
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user defined include paths
-    Lib/OLED_JX/Inc
+    # Lib/OLED_JX/Inc
     Lib/PID/Inc
     Lib/Motor/Inc
     Lib/COM/Inc
-    Lib/MPU6500/Inc
+    Lib/MPU6050/Inc
 )
 
 # Add project symbols (macros)

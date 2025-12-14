@@ -59,27 +59,24 @@ char *float_to_string(float f, char *buffer, int decimal_places);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
-#define SPI_NSS_Pin GPIO_PIN_4
-#define SPI_NSS_GPIO_Port GPIOA
+#define BIN2_Pin GPIO_PIN_4
+#define BIN2_GPIO_Port GPIOA
+#define STBY_Pin GPIO_PIN_5
+#define STBY_GPIO_Port GPIOA
 #define SDA_Pin GPIO_PIN_10
 #define SDA_GPIO_Port GPIOB
 #define SCL_Pin GPIO_PIN_11
 #define SCL_GPIO_Port GPIOB
 #define LED_Pin GPIO_PIN_11
 #define LED_GPIO_Port GPIOA
-#define STBY_Pin GPIO_PIN_15
-#define STBY_GPIO_Port GPIOA
-#define AIN2_Pin GPIO_PIN_3
-#define AIN2_GPIO_Port GPIOB
-#define AIN1_Pin GPIO_PIN_6
+#define AIN2_Pin GPIO_PIN_15
+#define AIN2_GPIO_Port GPIOA
+#define AIN1_Pin GPIO_PIN_3
 #define AIN1_GPIO_Port GPIOB
-#define BIN2_Pin GPIO_PIN_7
-#define BIN2_GPIO_Port GPIOB
 #define BIN1_Pin GPIO_PIN_8
 #define BIN1_GPIO_Port GPIOB
 
 /* USER CODE BEGIN Private defines */
-#define UART_RX_BUF_LEN 64
 #define ENCODER_PPR 41    // 编码器每转脉冲数
 #define SPEED_SCALE 280.0 // 速度换算系数
 #define PID_PERIOD_MS 10  // PID控制周期(ms)
