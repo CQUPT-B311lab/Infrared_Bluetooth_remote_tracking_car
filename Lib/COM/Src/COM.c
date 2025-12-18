@@ -228,6 +228,8 @@ uint8_t cmd_parser(const char *cmd) {
 
       float l = 0, r = 0;
       int n = sscanf(param, "%f,%f", &l, &r);
+      l = V_TO_TICK(l);
+      r = V_TO_TICK(r);
       if (n == 1) {
         target_L = l;
         target_R = l;
@@ -377,8 +379,6 @@ uint8_t cmd_parser(const char *cmd) {
     }
 
     case CMD_GET_SPEED: {
-      // 你已明确目标单位为“脉冲/10ms”，这里直接回传原始测量与目标
-      // 也可同时给出换算后的rps/rpm，若你后续需要再加。
       msgf(MSG_SPEED, "%d,%d,%.1f,%.1f", (int)M_speed_L, (int)M_speed_R,
            target_L, target_R);
       // 格式：measL,measR,targetL,targetR
@@ -386,15 +386,14 @@ uint8_t cmd_parser(const char *cmd) {
     }
 
     case CMD_SET_TARGET_SPEED: {
-      // 保留该命令：按你的要求也用“脉冲/10ms”
       if (strlen(param) == 0) {
         msg(MSG_ERROR, "Need target speed");
         return 0;
       }
       float t = atof(param);
       stop_flag = 1;
-      target_L = t;
-      target_R = t;
+      target_L = V_TO_TICK(t);
+      target_R = V_TO_TICK(t);
       snprintf(response, sizeof(response), "Target:%.1f(pulse/10ms)", t);
       msg(MSG_LOG, response);
       return 1;

@@ -343,8 +343,8 @@ int main(void) {
       // msgf(MSG_LOG, "%d.00,%s", M_speed_R,
       //      float_to_string(target_R, float_buf1, 2));
       msgf(MSG_LOG, "%s,%d",
-           float_to_string(((M_speed_L + M_speed_R) / 2.0) / PLUS_PER_CYC,
-                           float_buf1, 2),
+           float_to_string(TICK_TO_V((M_speed_L + M_speed_R) / 2.0), float_buf1,
+                           2),
            (int)y);
     }
     // MPU6500_Get_All_Data(&mpu_data);
