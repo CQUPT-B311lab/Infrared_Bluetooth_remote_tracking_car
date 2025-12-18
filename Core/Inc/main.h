@@ -67,6 +67,8 @@ char *float_to_string(float f, char *buffer, int decimal_places);
 #define SDA_GPIO_Port GPIOB
 #define SCL_Pin GPIO_PIN_11
 #define SCL_GPIO_Port GPIOB
+#define BUZZ_Pin GPIO_PIN_12
+#define BUZZ_GPIO_Port GPIOB
 #define LED_Pin GPIO_PIN_11
 #define LED_GPIO_Port GPIOA
 #define AIN2_Pin GPIO_PIN_15

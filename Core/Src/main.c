@@ -172,7 +172,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
         SetSpeed(&htim1, 0);
       } else {
 
-        float diff_yaw = normalize_angle(target_Y) - yaw_now;
+        float diff_yaw = normalize_angle(target_Y) - normalize_angle(yaw_now);
         // 处理跨越±180°的情况
         if (diff_yaw > 180.0f) {
           diff_yaw -= 360.0f;
@@ -185,10 +185,14 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
         float yaw_correction = PID_Update(&pid_yaw);
 
         // 目标限幅：避免不可能达到的设定导致长时间饱和
-        float tL =
-            clampf(target_L + yaw_correction, -TARGET_LIMIT, TARGET_LIMIT);
-        float tR =
-            clampf(target_R - yaw_correction, -TARGET_LIMIT, TARGET_LIMIT);
+        float tL, tR;
+        if (fabs(diff_yaw) < 5.0) {
+          tL = clampf(target_L + yaw_correction, -TARGET_LIMIT, TARGET_LIMIT);
+          tR = clampf(target_R - yaw_correction, -TARGET_LIMIT, TARGET_LIMIT);
+        } else {
+          tL = clampf(yaw_correction, -TARGET_LIMIT, TARGET_LIMIT);
+          tR = clampf(-yaw_correction, -TARGET_LIMIT, TARGET_LIMIT);
+        }
 
         pid_L.Exp = tL;
         pid_L.Mea = (float)M_speed_L;
@@ -206,6 +210,8 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
             SetSpeed(&htim1, 0);
             SetSpeed(&htim4, 0);
             distance_mode = 0;
+            target_d = 0;
+            measure_d = 0;
             stop_flag = 1;
             outL = 0;
             outR = 0;
@@ -219,7 +225,6 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
           }
         }
 
-        // 最后再保险限幅
         if (outL > PWM_MAX)
           outL = PWM_MAX;
         if (outL < -PWM_MAX)
@@ -336,22 +341,15 @@ int main(void) {
       print_flag = 0;
       // float x = pid_yaw.Out;
       float y = mpu_data.yaw;
-      // msgf(MSG_LOG, "%s,%s", float_to_string(y, float_buf1, 2),
-      //      float_to_string(x, float_buf2, 2));
-      // msgf(MSG_LOG, "%d,%d", TraceSensor_GetFilteredValue(0),
-      // msgf(MSG_LOG, "%d", GetSpeed(&htim2));
-      // msgf(MSG_LOG, "%d.00,%s", M_speed_R,
-      //      float_to_string(target_R, float_buf1, 2));
+
       msgf(MSG_LOG, "%s,%d",
            float_to_string(TICK_TO_V((M_speed_L + M_speed_R) / 2.0), float_buf1,
                            2),
            (int)y);
+      // msgf(MSG_LOG, "%d, %d", (int)(target_L + pid_yaw.Out),
+      //      (int)(target_R - pid_yaw.Out));
     }
-    // MPU6500_Get_All_Data(&mpu_data);
-    // msg_gyroscope(mpu_data.yaw, mpu_data.pitch, mpu_data.roll);
-    // HAL_Delay(10);
-    // msgf(MSG_LOG, "%d,%d", GetSpeed(&htim2), GetSpeed(&htim3));
-    // HAL_Delay(100);
+
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -766,6 +764,9 @@ static void MX_GPIO_Init(void) {
                     GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(BUZZ_GPIO_Port, BUZZ_Pin, GPIO_PIN_SET);
+
+  /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pins : BIN2_Pin STBY_Pin LED_Pin AIN2_Pin */
@@ -775,8 +776,9 @@ static void MX_GPIO_Init(void) {
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : SDA_Pin SCL_Pin AIN1_Pin BIN1_Pin */
-  GPIO_InitStruct.Pin = SDA_Pin | SCL_Pin | AIN1_Pin | BIN1_Pin;
+  /*Configure GPIO pins : SDA_Pin SCL_Pin BUZZ_Pin AIN1_Pin
+                           BIN1_Pin */
+  GPIO_InitStruct.Pin = SDA_Pin | SCL_Pin | BUZZ_Pin | AIN1_Pin | BIN1_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;

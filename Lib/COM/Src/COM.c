@@ -227,7 +227,7 @@ uint8_t cmd_parser(const char *cmd) {
       }
 
       float l = 0, r = 0;
-      int n = sscanf(param, "%f,%f", &l, &r);
+      int n = sscanf(param, "%f,%f\n", &l, &r);
       l = V_TO_TICK(l);
       r = V_TO_TICK(r);
       if (n == 1) {
@@ -393,7 +393,9 @@ uint8_t cmd_parser(const char *cmd) {
       float t = atof(param);
       stop_flag = 1;
       target_L = V_TO_TICK(t);
-      target_R = V_TO_TICK(t);
+      target_R = target_L;
+      pid_yaw.Outmax = target_L < 5 ? 10 : target_L * 2;
+      pid_yaw.Outmin = target_L < 5 ? -10 : -target_L * 2;
       snprintf(response, sizeof(response), "Target:%.1f(pulse/10ms)", t);
       msg(MSG_LOG, response);
       return 1;
