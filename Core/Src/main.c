@@ -91,11 +91,13 @@ volatile float target_L = 0;
 volatile float target_R = 0;
 PID_t pid_yaw;
 volatile float target_Y = 0;
+int16_t yaw_P = 10; // yaw调节比例系数
 
 volatile uint8_t TIM4_RCC = 0;
 volatile uint8_t TIM1_RCC = 0;
 
 MPU6500_Data mpu_data;
+uint8_t MPU6500_flag = 0;
 // extern MPU6050_Angle mpu_angle;
 /* USER CODE END PV */
 
@@ -112,17 +114,25 @@ static void MX_TIM2_Init(void);
 static void MX_I2C1_Init(void);
 /* USER CODE BEGIN PFP */
 static inline float clampf(float x, float minv, float maxv);
-static inline int16_t apply_pwm_min_start(int16_t u, int16_t pwm_min);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+float normalize_angle(float angle) {
+  while (angle > 180.0f)
+    angle -= 360.0f;
+  while (angle < -180.0f)
+    angle += 360.0f;
+  return angle;
+}
+
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
   if (htim->Instance == TIM1) {
     TIM1_RCC++;
     if (TIM1_RCC == 10) {
       TIM1_RCC = 0;
-      MPU6500_Get_All_Data(&mpu_data);
+      if (MPU6500_flag)
+        MPU6500_Get_All_Data(&mpu_data);
     }
   }
   if (htim->Instance == TIM4) {
@@ -151,9 +161,24 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
         SetSpeed(&htim4, 0);
         SetSpeed(&htim1, 0);
       } else {
+
+        float diff_yaw = normalize_angle(target_Y) - yaw_now;
+        // 处理跨越±180°的情况
+        if (diff_yaw > 180.0f) {
+          diff_yaw -= 360.0f;
+        } else if (diff_yaw < -180.0f) {
+          diff_yaw += 360.0f;
+        }
+
+        pid_yaw.Exp = 0;
+        pid_yaw.Mea = diff_yaw;
+        float yaw_correction = PID_Update(&pid_yaw);
+
         // 目标限幅：避免不可能达到的设定导致长时间饱和
-        float tL = clampf(target_L, -TARGET_LIMIT, TARGET_LIMIT);
-        float tR = clampf(target_R, -TARGET_LIMIT, TARGET_LIMIT);
+        float tL =
+            clampf(target_L + yaw_correction, -TARGET_LIMIT, TARGET_LIMIT);
+        float tR =
+            clampf(target_R - yaw_correction, -TARGET_LIMIT, TARGET_LIMIT);
 
         pid_L.Exp = tL;
         pid_L.Mea = (float)M_speed_L;
@@ -161,22 +186,19 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
         pid_R.Exp = tR;
         pid_R.Mea = (float)M_speed_R;
 
-        pid_yaw.Exp = target_Y;
-        pid_yaw.Mea = yaw_now;
-
         int16_t outL = (int16_t)PID_Update(&pid_L);
         int16_t outR = (int16_t)PID_Update(&pid_R);
 
-        float yaw_correction = PID_Update(&pid_yaw);
+        // PID_Update(&pid_yaw);
 
-        target_R = outR + yaw_correction / 2.0f;
-        target_L = outL - yaw_correction / 2.0f;
+        // target_R = outR + yaw_correction / 2.0f * yaw_P;
+        // target_L = outL - yaw_correction / 2.0f * yaw_P;
 
         // 最小启动PWM：只有当“目标不为0”时才强制最小PWM
-        if (tL != 0.0f)
-          outL = apply_pwm_min_start(outL, PWM_MIN_START);
-        if (tR != 0.0f)
-          outR = apply_pwm_min_start(outR, PWM_MIN_START);
+        // if (tL != 0.0f)
+        //   outL = apply_pwm_min_start(outL, PWM_MIN_START);
+        // if (tR != 0.0f)
+        //   outR = apply_pwm_min_start(outR, PWM_MIN_START);
 
         // 最后再保险限幅
         if (outL > PWM_MAX)
@@ -242,7 +264,6 @@ int main(void) {
 
   HAL_TIM_Encoder_Start(&htim2, TIM_CHANNEL_ALL);
   HAL_TIM_Encoder_Start(&htim3, TIM_CHANNEL_ALL);
-  HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_RESET);
 
   // if (MPU6050_Init() == 0) {
   //   Error_Handler();
@@ -253,14 +274,15 @@ int main(void) {
   HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_4);
   HAL_TIM_Base_Start_IT(&htim4);
 
-  PID_Init(&pid_L, 170.0f, 20.0f, 5.0f, 999.0f, -999.0f, 400.0f);
-  PID_Init(&pid_R, 150.0f, 15.0f, 5.0f, 999.0f, -999.0f, 400.0f);
-  PID_Init(&pid_yaw, 50.0f, 0.0f, 1.0f, 999.0f, -999.0f, 400.0f);
+  PID_Init(&pid_L, 10.0f, 10.0f, 3.0f, 999.0f, -999.0f, 400.0f);
+  PID_Init(&pid_R, 10.0f, 10.0f, 3.0f, 999.0f, -999.0f, 400.0f);
+  PID_Init(&pid_yaw, 0.1f, 0.0f, 1.0f, 5.0f, -5.0f, 400.0f);
 
   target_L = 0;
   target_R = 0;
 
   Motor_Init();
+  HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_RESET);
   // MPU6050_Calculate_Angle();
   /* USER CODE END 2 */
 
@@ -269,6 +291,7 @@ int main(void) {
   // target_L = 3;
   // target_R = 3;
   // stop_flag = 0;
+  MPU6500_flag = 1;
   while (1) {
 
     // OLED_ShowString(0, 0, "Motor Monitor", OLED_6X8);
@@ -285,7 +308,12 @@ int main(void) {
     }
     if (print_flag) {
       print_flag = 0;
-      msgf(MSG_LOG, "%d,%d", (int)target_R, (int)M_speed_R);
+      float x = pid_yaw.Out;
+      float y = mpu_data.yaw;
+      msgf(MSG_LOG, "%s,%s", float_to_string(y, float_buf1, 2),
+           float_to_string(x, float_buf2, 2));
+      // msgf(MSG_LOG, "%d.00,%s", M_speed_R,
+      //      float_to_string(target_R, float_buf1, 2));
     }
     // MPU6500_Get_All_Data(&mpu_data);
     // msg_gyroscope(mpu_data.yaw, mpu_data.pitch, mpu_data.roll);
@@ -502,7 +530,7 @@ static void MX_TIM2_Init(void) {
 
   /* USER CODE END TIM2_Init 1 */
   htim2.Instance = TIM2;
-  htim2.Init.Prescaler = 4 - 1;
+  htim2.Init.Prescaler = 0;
   htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
   htim2.Init.Period = 65535;
   htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
@@ -547,7 +575,7 @@ static void MX_TIM3_Init(void) {
 
   /* USER CODE END TIM3_Init 1 */
   htim3.Instance = TIM3;
-  htim3.Init.Prescaler = 2 - 1;
+  htim3.Init.Prescaler = 0;
   htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
   htim3.Init.Period = 65535;
   htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
@@ -817,16 +845,6 @@ static inline float clampf(float x, float minv, float maxv) {
   if (x < minv)
     return minv;
   return x;
-}
-
-static inline int16_t apply_pwm_min_start(int16_t u, int16_t pwm_min) {
-  if (u == 0)
-    return 0;
-  if (u > 0 && u < pwm_min)
-    return pwm_min;
-  if (u < 0 && u > -pwm_min)
-    return -pwm_min;
-  return u;
 }
 
 void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart) {

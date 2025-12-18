@@ -22,9 +22,11 @@ extern volatile int16_t M_speed_R;
 
 extern volatile float target_L; // 单位：脉冲/10ms
 extern volatile float target_R; // 单位：脉冲/10ms
+extern volatile float target_Y;
 
 extern PID_t pid_L;
 extern PID_t pid_R;
+extern PID_t pid_yaw;
 
 /* ========================= 工具函数 ========================= */
 
@@ -214,9 +216,13 @@ uint8_t cmd_parser(const char *cmd) {
     if (n == 1) {
       target_L = l;
       target_R = l;
+      pid_yaw.Outmax = l;
+      pid_yaw.Outmin = -l;
     } else if (n == 2) {
       target_L = l;
       target_R = r;
+      pid_yaw.Outmax = l > r ? r : l;
+      pid_yaw.Outmin = l > r ? -r : -l;
     } else {
       msg(MSG_ERROR, "SET_SPEED format:v or vL,vR");
       return 0;
@@ -292,8 +298,11 @@ uint8_t cmd_parser(const char *cmd) {
       pid = &pid_L;
     if (side == 'R' || side == 'r')
       pid = &pid_R;
+    if (side == 'Y' || side == 'y') {
+      pid = &pid_yaw;
+    }
     if (pid == NULL) {
-      msg(MSG_ERROR, "PID side must be L/R");
+      msg(MSG_ERROR, "PID side must be L/R/Y");
       return 0;
     }
 
@@ -330,6 +339,10 @@ uint8_t cmd_parser(const char *cmd) {
     if (target == 'R') {
       pid = &pid_R;
     }
+    if (target == 'Y') {
+      pid = &pid_yaw;
+    }
+
     msgf(MSG_LOG, "P:%s, I:%s, D:%s", float_to_string(pid->Kp, float_buf1, 2),
          float_to_string(pid->Ki, float_buf2, 2),
          float_to_string(pid->Kd, float_buf3, 2));
@@ -373,6 +386,18 @@ uint8_t cmd_parser(const char *cmd) {
     HAL_Delay(200);
     HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_SET);
     msg(MSG_LOG, "PID reset");
+    return 1;
+  }
+
+  case CMD_SET_YAW: {
+    if (strlen(param) == 0) {
+      msg(MSG_ERROR, "Need target speed");
+      return 0;
+    }
+
+    float y = atof(param);
+    target_Y = y;
+
     return 1;
   }
 
