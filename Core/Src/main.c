@@ -30,6 +30,7 @@
 #include "stm32f1xx_hal_gpio.h"
 #include "stm32f1xx_hal_tim.h"
 #include "stm32f1xx_hal_uart.h"
+#include "trace_sensor.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -56,6 +57,7 @@
 
 /* Private variables ---------------------------------------------------------*/
 ADC_HandleTypeDef hadc1;
+DMA_HandleTypeDef hdma_adc1;
 
 I2C_HandleTypeDef hi2c1;
 
@@ -92,13 +94,20 @@ volatile float target_R = 0;
 PID_t pid_yaw;
 volatile float target_Y = 0;
 int16_t yaw_P = 10; // yaw调节比例系数
+volatile int16_t target_d = 0;
+uint8_t distance_mode = 0;
+volatile int16_t measure_d = 0;
 
 volatile uint8_t TIM4_RCC = 0;
 volatile uint8_t TIM1_RCC = 0;
 
 MPU6500_Data mpu_data;
 uint8_t MPU6500_flag = 0;
-// extern MPU6050_Angle mpu_angle;
+uint8_t joystick_mode = 0; // 摇杆模式
+uint8_t turn_l_flag = 0;
+uint8_t turn_r_flag = 0;
+
+extern volatile uint16_t adc_dma_buffer[TRACE_CHANNELS];
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -133,6 +142,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
       TIM1_RCC = 0;
       if (MPU6500_flag)
         MPU6500_Get_All_Data(&mpu_data);
+      TraceSensor_Update();
     }
   }
   if (htim->Instance == TIM4) {
@@ -189,16 +199,25 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
         int16_t outL = (int16_t)PID_Update(&pid_L);
         int16_t outR = (int16_t)PID_Update(&pid_R);
 
-        // PID_Update(&pid_yaw);
-
-        // target_R = outR + yaw_correction / 2.0f * yaw_P;
-        // target_L = outL - yaw_correction / 2.0f * yaw_P;
-
-        // 最小启动PWM：只有当“目标不为0”时才强制最小PWM
-        // if (tL != 0.0f)
-        //   outL = apply_pwm_min_start(outL, PWM_MIN_START);
-        // if (tR != 0.0f)
-        //   outR = apply_pwm_min_start(outR, PWM_MIN_START);
+        if (distance_mode) {
+          measure_d += (M_speed_L + M_speed_R) / 2;
+          float remain = measure_d - target_d;
+          if (measure_d >= target_d) {
+            SetSpeed(&htim1, 0);
+            SetSpeed(&htim4, 0);
+            distance_mode = 0;
+            stop_flag = 1;
+            outL = 0;
+            outR = 0;
+            return;
+          } else if (remain / target_d <= 0.3f) {
+            outL = (float)outL * 0.5;
+            outR = (float)outR * 0.5;
+          } else if (remain / target_d <= 0.1f) {
+            outL = (float)outL * 0.2;
+            outR = (float)outR * 0.2;
+          }
+        }
 
         // 最后再保险限幅
         if (outL > PWM_MAX)
@@ -258,6 +277,8 @@ int main(void) {
   MX_I2C1_Init();
   /* USER CODE BEGIN 2 */
   HAL_UARTEx_ReceiveToIdle_DMA(&huart2, RX_Buf_Active, UART_RX_BUF_LEN);
+  TraceSensor_Init();
+  TraceSensor_Start();
   // Init_BT(1500); // 这个只需要执行一次去初始化
   // OLED_Init();
   MPU6500_Init_With_Calibration();
@@ -276,7 +297,7 @@ int main(void) {
 
   PID_Init(&pid_L, 10.0f, 10.0f, 3.0f, 999.0f, -999.0f, 400.0f);
   PID_Init(&pid_R, 10.0f, 10.0f, 3.0f, 999.0f, -999.0f, 400.0f);
-  PID_Init(&pid_yaw, 0.1f, 0.0f, 1.0f, 5.0f, -5.0f, 400.0f);
+  PID_Init(&pid_yaw, 1.0f, 0.0f, 10.0f, 10.0f, -10.0f, 400.0f);
 
   target_L = 0;
   target_R = 0;
@@ -307,13 +328,24 @@ int main(void) {
       }
     }
     if (print_flag) {
+      if (turn_l_flag) {
+        target_Y += 0.5;
+      } else if (turn_r_flag) {
+        target_Y -= 0.5;
+      }
       print_flag = 0;
-      float x = pid_yaw.Out;
+      // float x = pid_yaw.Out;
       float y = mpu_data.yaw;
-      msgf(MSG_LOG, "%s,%s", float_to_string(y, float_buf1, 2),
-           float_to_string(x, float_buf2, 2));
+      // msgf(MSG_LOG, "%s,%s", float_to_string(y, float_buf1, 2),
+      //      float_to_string(x, float_buf2, 2));
+      // msgf(MSG_LOG, "%d,%d", TraceSensor_GetFilteredValue(0),
+      // msgf(MSG_LOG, "%d", GetSpeed(&htim2));
       // msgf(MSG_LOG, "%d.00,%s", M_speed_R,
       //      float_to_string(target_R, float_buf1, 2));
+      msgf(MSG_LOG, "%s,%d",
+           float_to_string(((M_speed_L + M_speed_R) / 2.0) / PLUS_PER_CYC,
+                           float_buf1, 2),
+           (int)y);
     }
     // MPU6500_Get_All_Data(&mpu_data);
     // msg_gyroscope(mpu_data.yaw, mpu_data.pitch, mpu_data.roll);
@@ -321,8 +353,6 @@ int main(void) {
     // msgf(MSG_LOG, "%d,%d", GetSpeed(&htim2), GetSpeed(&htim3));
     // HAL_Delay(100);
     /* USER CODE END WHILE */
-    // HAL_Delay(1000);
-    // stop_flag = 1;
 
     /* USER CODE BEGIN 3 */
   }
@@ -391,12 +421,12 @@ static void MX_ADC1_Init(void) {
   /** Common config
    */
   hadc1.Instance = ADC1;
-  hadc1.Init.ScanConvMode = ADC_SCAN_DISABLE;
-  hadc1.Init.ContinuousConvMode = DISABLE;
+  hadc1.Init.ScanConvMode = ADC_SCAN_ENABLE;
+  hadc1.Init.ContinuousConvMode = ENABLE;
   hadc1.Init.DiscontinuousConvMode = DISABLE;
   hadc1.Init.ExternalTrigConv = ADC_SOFTWARE_START;
   hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
-  hadc1.Init.NbrOfConversion = 1;
+  hadc1.Init.NbrOfConversion = 2;
   if (HAL_ADC_Init(&hadc1) != HAL_OK) {
     Error_Handler();
   }
@@ -405,7 +435,15 @@ static void MX_ADC1_Init(void) {
    */
   sConfig.Channel = ADC_CHANNEL_8;
   sConfig.Rank = ADC_REGULAR_RANK_1;
-  sConfig.SamplingTime = ADC_SAMPLETIME_1CYCLE_5;
+  sConfig.SamplingTime = ADC_SAMPLETIME_28CYCLES_5;
+  if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK) {
+    Error_Handler();
+  }
+
+  /** Configure Regular Channel
+   */
+  sConfig.Channel = ADC_CHANNEL_9;
+  sConfig.Rank = ADC_REGULAR_RANK_2;
   if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK) {
     Error_Handler();
   }
@@ -693,6 +731,9 @@ static void MX_DMA_Init(void) {
   __HAL_RCC_DMA1_CLK_ENABLE();
 
   /* DMA interrupt init */
+  /* DMA1_Channel1_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Channel1_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Channel1_IRQn);
   /* DMA1_Channel6_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(DMA1_Channel6_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(DMA1_Channel6_IRQn);

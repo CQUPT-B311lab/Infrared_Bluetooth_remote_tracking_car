@@ -24,6 +24,8 @@ typedef enum {
   CMD_GO_STRAIGHT = 2,
   CMD_TURN_LEFT = 3,
   CMD_TURN_RIGHT = 4,
+  CMD_STOP_TURN = 5,
+  CMD_SET_DISTANCE = 6,
   // 扩展指令
   CMD_STOP = 10,
   CMD_START = 11,

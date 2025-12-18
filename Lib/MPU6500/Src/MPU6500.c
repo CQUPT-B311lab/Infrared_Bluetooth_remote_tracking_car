@@ -343,17 +343,6 @@ extern I2C_HandleTypeDef hi2c1; // 假设使用I2C1
 
 // 删除SPI相关的CS引脚控制宏
 
-// 常量定义（保持不变）
-#define RAD_TO_DEG 57.295779513f
-#define INV_GYRO_SCALE 0.007633587786f
-#define INV_ACCEL_SCALE 0.000061035156f
-#define COMP_FILTER_ALPHA 0.98f
-#define INV_COMP_FILTER 0.02f
-#define SAMPLE_TIME 0.01f
-#define PI 3.14159265359f
-#define PI_2 1.57079632679f
-#define DEG_TO_RAD 0.01745329251f
-
 // 全局变量（保持不变）
 static MPU6500_Data last_data = {0};
 static int16_t gyro_offset[3] = {0, 0, 0};

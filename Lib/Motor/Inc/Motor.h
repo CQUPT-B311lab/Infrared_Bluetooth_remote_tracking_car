@@ -3,9 +3,9 @@
 
 #include "main.h"
 
-#define PLUS_PER_SEC 224 // 定时器每积累224表示外轮旋转一圈
+#define PLUS_PER_CYC 830 // 定时器每积累820表示外轮旋转一圈
 
-#define R_TIRE 32.5e-3f // 轮胎直径（米）
+#define R_TIRE 0.0325f // 轮胎半径（米）
 
 int16_t GetSpeed(TIM_HandleTypeDef *tim);
 

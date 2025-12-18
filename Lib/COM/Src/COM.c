@@ -1,4 +1,5 @@
 #include "COM.h"
+#include "MPU6500.h"
 #include "Motor.h"
 #include "PID.h"
 #include "main.h"
@@ -7,6 +8,7 @@
 #include "stdlib.h"
 #include "stm32f1xx_hal_uart.h"
 #include "string.h"
+#include <stdint.h>
 #include <sys/_intsup.h>
 
 extern UART_HandleTypeDef huart2;
@@ -27,6 +29,14 @@ extern volatile float target_Y;
 extern PID_t pid_L;
 extern PID_t pid_R;
 extern PID_t pid_yaw;
+
+extern uint8_t joystick_mode;
+
+extern uint8_t turn_l_flag;
+extern uint8_t turn_r_flag;
+
+extern volatile int16_t target_d;
+extern uint8_t distance_mode;
 
 /* ========================= 工具函数 ========================= */
 
@@ -167,243 +177,265 @@ void COM_StreamTick(void) {
  *   CMD_SET_PID:                      #<id>:L,kp,ki,kd 或 R,kp,ki,kd
  */
 uint8_t cmd_parser(const char *cmd) {
-  if (cmd == NULL || cmd[0] != '#')
-    return 0;
+  if (joystick_mode) {
 
-  char cmd_buf[64];
-  strncpy(cmd_buf, cmd, sizeof(cmd_buf) - 1);
-  cmd_buf[sizeof(cmd_buf) - 1] = '\0';
-  trim_newline(cmd_buf);
-
-  int cmd_id = -1;
-  char param[40] = {0};
-
-  char *colon_ptr = strchr(cmd_buf, ':');
-  if (colon_ptr == NULL) {
-    if (sscanf(cmd_buf, "#%d", &cmd_id) != 1) {
-      msg(MSG_ERROR, "Invalid cmd format");
-      return 0;
-    }
+    return 1;
   } else {
-    *colon_ptr = '\0';
-    if (sscanf(cmd_buf, "#%d", &cmd_id) != 1) {
-      msg(MSG_ERROR, "Invalid cmd ID");
+
+    if (cmd == NULL || cmd[0] != '#')
       return 0;
-    }
-    strncpy(param, colon_ptr + 1, sizeof(param) - 1);
-    trim_newline(param);
-  }
 
-  char response[96];
+    char cmd_buf[64];
+    strncpy(cmd_buf, cmd, sizeof(cmd_buf) - 1);
+    cmd_buf[sizeof(cmd_buf) - 1] = '\0';
+    trim_newline(cmd_buf);
 
-  switch ((UART_CMD_ID_t)cmd_id) {
-  case CMD_OTA:
-    msg(MSG_OTA, "Entering OTA mode");
-    // TODO: 跳转到Bootloader
-    return 1;
+    int cmd_id = -1;
+    char param[40] = {0};
 
-  case CMD_SET_SPEED: {
-    // 支持两种格式：
-    //  1) #ID:30        -> L=30,R=30
-    //  2) #ID:30,28     -> L=30,R=28
-    if (strlen(param) == 0) {
-      msg(MSG_ERROR, "SET_SPEED needs param");
-      return 0;
-    }
-
-    float l = 0, r = 0;
-    int n = sscanf(param, "%f,%f", &l, &r);
-    if (n == 1) {
-      target_L = l;
-      target_R = l;
-      pid_yaw.Outmax = l;
-      pid_yaw.Outmin = -l;
-    } else if (n == 2) {
-      target_L = l;
-      target_R = r;
-      pid_yaw.Outmax = l > r ? r : l;
-      pid_yaw.Outmin = l > r ? -r : -l;
+    char *colon_ptr = strchr(cmd_buf, ':');
+    if (colon_ptr == NULL) {
+      if (sscanf(cmd_buf, "#%d", &cmd_id) != 1) {
+        msg(MSG_ERROR, "Invalid cmd format");
+        return 0;
+      }
     } else {
-      msg(MSG_ERROR, "SET_SPEED format:v or vL,vR");
+      *colon_ptr = '\0';
+      if (sscanf(cmd_buf, "#%d", &cmd_id) != 1) {
+        msg(MSG_ERROR, "Invalid cmd ID");
+        return 0;
+      }
+      strncpy(param, colon_ptr + 1, sizeof(param) - 1);
+      trim_newline(param);
+    }
+
+    char response[96];
+
+    switch ((UART_CMD_ID_t)cmd_id) {
+    case CMD_OTA:
+      msg(MSG_OTA, "Entering OTA mode");
+      // TODO: 跳转到Bootloader
+      return 1;
+
+    case CMD_SET_SPEED: {
+      // 支持两种格式：
+      //  1) #ID:30        -> L=30,R=30
+      //  2) #ID:30,28     -> L=30,R=28
+      if (strlen(param) == 0) {
+        msg(MSG_ERROR, "SET_SPEED needs param");
+        return 0;
+      }
+
+      float l = 0, r = 0;
+      int n = sscanf(param, "%f,%f", &l, &r);
+      if (n == 1) {
+        target_L = l;
+        target_R = l;
+        pid_yaw.Outmax = l < 5 ? 10 : l * 2;
+        pid_yaw.Outmin = l < 5 ? -10 : -l * 2;
+      } else if (n == 2) {
+        target_L = l;
+        target_R = r;
+        float minspeed = l > r ? r : l;
+        pid_yaw.Outmax = minspeed < 5 ? 10 : 2 * minspeed;
+        pid_yaw.Outmin = minspeed < 5 ? -10 : -2 * minspeed;
+      } else {
+        msg(MSG_ERROR, "SET_SPEED format:v or vL,vR");
+        return 0;
+      }
+
+      snprintf(response, sizeof(response), "SetSpeed L=%.1f R=%.1f(pulse/10ms)",
+               target_L, target_R);
+      msg(MSG_LOG, response);
+      return 1;
+    }
+
+    case CMD_GO_STRAIGHT: {
+      if (strlen(param) == 0) {
+        msg(MSG_ERROR, "GO_STRAIGHT needs speed");
+        return 0;
+      }
+      float speed = atof(param);
+      target_L = speed;
+      target_R = speed;
+      stop_flag = 0;
+      snprintf(response, sizeof(response), "Straight:%.1f(pulse/10ms)", speed);
+      msg(MSG_LOG, response);
+      return 1;
+    }
+
+    case CMD_TURN_LEFT: {
+      turn_l_flag = 1;
+      turn_r_flag = 0;
+      msg(MSG_LOG, "Ack");
+      return 1;
+    }
+
+    case CMD_TURN_RIGHT: {
+      turn_l_flag = 0;
+      turn_r_flag = 1;
+      msg(MSG_LOG, "Ack");
+      return 1;
+    }
+
+    case CMD_STOP_TURN: {
+      turn_l_flag = 0;
+      turn_r_flag = 0;
       return 0;
     }
 
-    snprintf(response, sizeof(response), "SetSpeed L=%.1f R=%.1f(pulse/10ms)",
-             target_L, target_R);
-    msg(MSG_LOG, response);
-    return 1;
-  }
+    case CMD_SET_DISTANCE: {
+      if (strlen(param) == 0) {
+        msg(MSG_ERROR, "Need target speed");
+        return 0;
+      }
+      float distance = atof(param);
 
-  case CMD_GO_STRAIGHT: {
-    if (strlen(param) == 0) {
-      msg(MSG_ERROR, "GO_STRAIGHT needs speed");
-      return 0;
-    }
-    float speed = atof(param);
-    target_L = speed;
-    target_R = speed;
-    stop_flag = 0;
-    snprintf(response, sizeof(response), "Straight:%.1f(pulse/10ms)", speed);
-    msg(MSG_LOG, response);
-    return 1;
-  }
+      target_d = (int16_t)((distance / (2 * PI * R_TIRE)) * PLUS_PER_CYC);
+      distance_mode = 1;
 
-  case CMD_TURN_LEFT: {
-    // 对速度闭环项目：转向也建议走“目标速度差速”，不要直接 SetSpeed(PWM)。
-    // 这里用“左慢右快”的目标，默认幅度可由 param 指定（脉冲/10ms）。
-    float v = (strlen(param) > 0) ? atof(param) : 30.0f;
-    stop_flag = 0;
-    target_L = -v;
-    target_R = v;
-    snprintf(response, sizeof(response), "TurnL v=%.1f(pulse/10ms)", v);
-    msg(MSG_LOG, response);
-    return 1;
-  }
-
-  case CMD_TURN_RIGHT: {
-    float v = (strlen(param) > 0) ? atof(param) : 30.0f;
-    stop_flag = 0;
-    target_L = v;
-    target_R = -v;
-    snprintf(response, sizeof(response), "TurnR v=%.1f(pulse/10ms)", v);
-    msg(MSG_LOG, response);
-    return 1;
-  }
-
-  case CMD_STOP:
-    stop_flag = 1;
-    target_L = 0;
-    target_R = 0;
-    msg(MSG_LOG, "STOPPED");
-    return 1;
-
-  case CMD_START:
-    stop_flag = 0;
-    msg(MSG_LOG, "STARTED");
-    return 1;
-
-  case CMD_SET_PID: {
-    // 期望格式：L,kp,ki,kd 或 R,kp,ki,kd
-    char side = 0;
-    int p = 0, i = 0, d = 0;
-
-    int n = sscanf(param, "%c,%d,%d,%d", &side, &p, &i, &d);
-    if (n != 4) {
-      msg(MSG_ERROR, "PID format:L,kp,ki,kd");
       return 0;
     }
 
-    PID_t *pid = NULL;
-    if (side == 'L' || side == 'l')
-      pid = &pid_L;
-    if (side == 'R' || side == 'r')
-      pid = &pid_R;
-    if (side == 'Y' || side == 'y') {
-      pid = &pid_yaw;
+    case CMD_STOP:
+      stop_flag = 1;
+      target_L = 0;
+      target_R = 0;
+      msg(MSG_LOG, "STOPPED");
+      return 1;
+
+    case CMD_START:
+      stop_flag = 0;
+      msg(MSG_LOG, "STARTED");
+      return 1;
+
+    case CMD_SET_PID: {
+      // 期望格式：L,kp,ki,kd 或 R,kp,ki,kd
+      char side = 0;
+      int p = 0, i = 0, d = 0;
+
+      int n = sscanf(param, "%c,%d,%d,%d", &side, &p, &i, &d);
+      if (n != 4) {
+        msg(MSG_ERROR, "PID format:L,kp,ki,kd");
+        return 0;
+      }
+
+      PID_t *pid = NULL;
+      if (side == 'L' || side == 'l')
+        pid = &pid_L;
+      if (side == 'R' || side == 'r')
+        pid = &pid_R;
+      if (side == 'Y' || side == 'y') {
+        pid = &pid_yaw;
+      }
+      if (pid == NULL) {
+        msg(MSG_ERROR, "PID side must be L/R/Y");
+        return 0;
+      }
+
+      pid->Kp = p;
+      pid->Ki = i;
+      pid->Kd = d;
+
+      // 清状态，避免参数切换引发冲击
+      pid->I = 0;
+      pid->Err = 0;
+      pid->Err1 = 0;
+      pid->Out = 0;
+
+      snprintf(response, sizeof(response), "PID %c=%d,%d,%d       ", side, p, i,
+               d);
+      msg(MSG_LOG, response);
+      return 1;
     }
-    if (pid == NULL) {
-      msg(MSG_ERROR, "PID side must be L/R/Y");
+
+    case CMD_GET_PID: {
+      if (strlen(param) == 0) {
+        msg(MSG_ERROR, "SET_SPEED needs param");
+        return 0;
+      }
+      char target;
+      sscanf(param, "%c", &target);
+      char float_buf1[8];
+      char float_buf2[8];
+      char float_buf3[8];
+      PID_t *pid = NULL;
+      if (target == 'L') {
+        pid = &pid_L;
+      }
+      if (target == 'R') {
+        pid = &pid_R;
+      }
+      if (target == 'Y') {
+        pid = &pid_yaw;
+      }
+
+      msgf(MSG_LOG, "P:%s, I:%s, D:%s", float_to_string(pid->Kp, float_buf1, 2),
+           float_to_string(pid->Ki, float_buf2, 2),
+           float_to_string(pid->Kd, float_buf3, 2));
+      return 1;
+    }
+
+    case CMD_GET_SPEED: {
+      // 你已明确目标单位为“脉冲/10ms”，这里直接回传原始测量与目标
+      // 也可同时给出换算后的rps/rpm，若你后续需要再加。
+      msgf(MSG_SPEED, "%d,%d,%.1f,%.1f", (int)M_speed_L, (int)M_speed_R,
+           target_L, target_R);
+      // 格式：measL,measR,targetL,targetR
+      return 1;
+    }
+
+    case CMD_SET_TARGET_SPEED: {
+      // 保留该命令：按你的要求也用“脉冲/10ms”
+      if (strlen(param) == 0) {
+        msg(MSG_ERROR, "Need target speed");
+        return 0;
+      }
+      float t = atof(param);
+      stop_flag = 1;
+      target_L = t;
+      target_R = t;
+      snprintf(response, sizeof(response), "Target:%.1f(pulse/10ms)", t);
+      msg(MSG_LOG, response);
+      return 1;
+    }
+
+    case CMD_PING:
+      msg(MSG_LOG, "Ack Ping");
+      return 1;
+
+    case CMD_RESET_PID: {
+      __disable_irq();
+      pid_L.I = pid_L.Err = pid_L.Err1 = pid_L.Out = 0;
+      pid_R.I = pid_R.Err = pid_R.Err1 = pid_R.Out = 0;
+      __enable_irq();
+      HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_RESET);
+      HAL_Delay(200);
+      HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_SET);
+      msg(MSG_LOG, "PID reset");
+      return 1;
+    }
+
+    case CMD_SET_YAW: {
+      if (strlen(param) == 0) {
+        msg(MSG_ERROR, "Need target speed");
+        return 0;
+      }
+
+      float y = atof(param);
+      target_Y = y;
+
+      return 1;
+    }
+
+    case CMD_JOY_STICK_MODE: {
+      return 1;
+    }
+
+    default:
+      snprintf(response, sizeof(response), "Unknown CMD:%d", cmd_id);
+      msg(MSG_ERROR, response);
       return 0;
     }
-
-    pid->Kp = p;
-    pid->Ki = i;
-    pid->Kd = d;
-
-    // 清状态，避免参数切换引发冲击
-    pid->I = 0;
-    pid->Err = 0;
-    pid->Err1 = 0;
-    pid->Out = 0;
-
-    snprintf(response, sizeof(response), "PID %c=%d,%d,%d       ", side, p, i,
-             d);
-    msg(MSG_LOG, response);
-    return 1;
-  }
-
-  case CMD_GET_PID: {
-    if (strlen(param) == 0) {
-      msg(MSG_ERROR, "SET_SPEED needs param");
-      return 0;
-    }
-    char target;
-    sscanf(param, "%c", &target);
-    char float_buf1[8];
-    char float_buf2[8];
-    char float_buf3[8];
-    PID_t *pid = NULL;
-    if (target == 'L') {
-      pid = &pid_L;
-    }
-    if (target == 'R') {
-      pid = &pid_R;
-    }
-    if (target == 'Y') {
-      pid = &pid_yaw;
-    }
-
-    msgf(MSG_LOG, "P:%s, I:%s, D:%s", float_to_string(pid->Kp, float_buf1, 2),
-         float_to_string(pid->Ki, float_buf2, 2),
-         float_to_string(pid->Kd, float_buf3, 2));
-    return 1;
-  }
-
-  case CMD_GET_SPEED: {
-    // 你已明确目标单位为“脉冲/10ms”，这里直接回传原始测量与目标
-    // 也可同时给出换算后的rps/rpm，若你后续需要再加。
-    msgf(MSG_SPEED, "%d,%d,%.1f,%.1f", (int)M_speed_L, (int)M_speed_R, target_L,
-         target_R);
-    // 格式：measL,measR,targetL,targetR
-    return 1;
-  }
-
-  case CMD_SET_TARGET_SPEED: {
-    // 保留该命令：按你的要求也用“脉冲/10ms”
-    if (strlen(param) == 0) {
-      msg(MSG_ERROR, "Need target speed");
-      return 0;
-    }
-    float t = atof(param);
-    stop_flag = 1;
-    target_L = t;
-    target_R = t;
-    snprintf(response, sizeof(response), "Target:%.1f(pulse/10ms)", t);
-    msg(MSG_LOG, response);
-    return 1;
-  }
-
-  case CMD_PING:
-    msg(MSG_LOG, "Ack Ping");
-    return 1;
-
-  case CMD_RESET_PID: {
-    __disable_irq();
-    pid_L.I = pid_L.Err = pid_L.Err1 = pid_L.Out = 0;
-    pid_R.I = pid_R.Err = pid_R.Err1 = pid_R.Out = 0;
-    __enable_irq();
-    HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_RESET);
-    HAL_Delay(200);
-    HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_SET);
-    msg(MSG_LOG, "PID reset");
-    return 1;
-  }
-
-  case CMD_SET_YAW: {
-    if (strlen(param) == 0) {
-      msg(MSG_ERROR, "Need target speed");
-      return 0;
-    }
-
-    float y = atof(param);
-    target_Y = y;
-
-    return 1;
-  }
-
-  default:
-    snprintf(response, sizeof(response), "Unknown CMD:%d", cmd_id);
-    msg(MSG_ERROR, response);
-    return 0;
   }
 }

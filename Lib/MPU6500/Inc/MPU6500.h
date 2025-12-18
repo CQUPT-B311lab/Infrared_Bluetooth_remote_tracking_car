@@ -376,14 +376,24 @@
 // 设备ID
 #define MPU6500_DEVICE_ID 0x70
 
-// 根据您的引脚连接情况，可能需要调整IIC地址
 #if defined(AD0_HIGH)
 #define MPU6500_ADDR MPU6500_I2C_ADDRESS_AD0_HIGH
 #else
 #define MPU6500_ADDR MPU6500_I2C_ADDRESS_AD0_LOW
 #endif
 
-// 数据结构定义（保持不变）
+// 常量定义
+#define RAD_TO_DEG 57.295779513f
+#define INV_GYRO_SCALE 0.007633587786f
+#define INV_ACCEL_SCALE 0.000061035156f
+#define COMP_FILTER_ALPHA 0.98f
+#define INV_COMP_FILTER 0.02f
+#define SAMPLE_TIME 0.01f
+#define PI 3.14159265359f
+#define PI_2 1.57079632679f
+#define DEG_TO_RAD 0.01745329251f
+
+// 数据结构定义
 typedef struct {
   float roll;
   float pitch;

@@ -51,6 +51,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Lib/PID/Src/PID.c
     Lib/COM/Src/COM.c
     Lib/MPU6500/Src/MPU6500.c
+    Lib/Trace_sensor/Src/trace_sensor.c
 )
 
 # Add include paths
@@ -61,6 +62,7 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     Lib/Motor/Inc
     Lib/COM/Inc
     Lib/MPU6500/Inc
+    Lib/Trace_sensor/Inc
 )
 
 # Add project symbols (macros)
