@@ -425,6 +425,7 @@ uint8_t cmd_parser(const char *cmd) {
 
       float y = atof(param);
       target_Y = y;
+      stop_flag = 1;
 
       return 1;
     }

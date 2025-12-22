@@ -91,12 +91,18 @@ PID_t pid_L;
 PID_t pid_R;
 volatile float target_L = 0;
 volatile float target_R = 0;
+
 PID_t pid_yaw;
 volatile float target_Y = 0;
 int16_t yaw_P = 10; // yaw调节比例系数
+
 volatile int16_t target_d = 0;
 uint8_t distance_mode = 0;
 volatile int16_t measure_d = 0;
+
+PID_t pid_trace;
+uint8_t trace_mode = 0;
+float trace_last_error = 0.0;
 
 volatile uint8_t TIM4_RCC = 0;
 volatile uint8_t TIM1_RCC = 0;
@@ -172,26 +178,68 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
         SetSpeed(&htim1, 0);
       } else {
 
-        float diff_yaw = normalize_angle(target_Y) - normalize_angle(yaw_now);
-        // 处理跨越±180°的情况
-        if (diff_yaw > 180.0f) {
-          diff_yaw -= 360.0f;
-        } else if (diff_yaw < -180.0f) {
-          diff_yaw += 360.0f;
-        }
-
-        pid_yaw.Exp = 0;
-        pid_yaw.Mea = diff_yaw;
-        float yaw_correction = PID_Update(&pid_yaw);
-
-        // 目标限幅：避免不可能达到的设定导致长时间饱和
         float tL, tR;
-        if (fabs(diff_yaw) < 5.0) {
-          tL = clampf(target_L + yaw_correction, -TARGET_LIMIT, TARGET_LIMIT);
-          tR = clampf(target_R - yaw_correction, -TARGET_LIMIT, TARGET_LIMIT);
+
+        if (!trace_mode) {
+          float diff_yaw = normalize_angle(target_Y) - normalize_angle(yaw_now);
+          // 处理跨越±180°的情况
+          if (diff_yaw > 180.0f) {
+            diff_yaw -= 360.0f;
+          } else if (diff_yaw < -180.0f) {
+            diff_yaw += 360.0f;
+          }
+
+          pid_yaw.Exp = 0;
+          pid_yaw.Mea = diff_yaw;
+          float yaw_correction = PID_Update(&pid_yaw);
+
+          // 目标限幅：避免不可能达到的设定导致长时间饱和
+          if (fabs(diff_yaw) < 5.0) {
+            tL = clampf(target_L + yaw_correction, -TARGET_LIMIT, TARGET_LIMIT);
+            tR = clampf(target_R - yaw_correction, -TARGET_LIMIT, TARGET_LIMIT);
+          } else {
+            tL = clampf(yaw_correction, -TARGET_LIMIT, TARGET_LIMIT);
+            tR = clampf(-yaw_correction, -TARGET_LIMIT, TARGET_LIMIT);
+          }
         } else {
-          tL = clampf(yaw_correction, -TARGET_LIMIT, TARGET_LIMIT);
-          tR = clampf(-yaw_correction, -TARGET_LIMIT, TARGET_LIMIT);
+          // 读取滤波值
+          float trance_adc_L = (float)TraceSensor_GetFilteredValue(0);
+          float trance_adc_R = (float)TraceSensor_GetFilteredValue(1);
+
+          // 是否在黑线上
+          uint8_t left_black = TraceSensor_IsBlack(0);
+          uint8_t right_black = TraceSensor_IsBlack(1);
+
+          // 丢线：两边都没检测到黑线
+          if (!left_black && !right_black) {
+            pid_trace.Exp = 0.0f;
+            pid_trace.Mea = trace_last_error;
+
+            tL = clampf(pid_trace.Out, -TARGET_LIMIT, TARGET_LIMIT);
+            tR = clampf(-pid_trace.Out, -TARGET_LIMIT, TARGET_LIMIT);
+          } else {
+
+            // 连续误差：左右差值
+            float e = (trance_adc_L - trance_adc_R);
+
+            // 归一化（降低光照变化影响）
+            float denom = (trance_adc_L + trance_adc_R);
+            if (denom < 1.0f)
+              denom = 1.0f;
+            e = e / denom;  // 约[-1,1]
+            e = e * 100.0f; // 放大到好调参的量级
+
+            trace_last_error = e;
+
+            pid_trace.Exp = 0.0f;
+            pid_trace.Mea = e;
+            float u = PID_Update(&pid_trace);
+            u = clampf(u, -10, 10);
+
+            // 映射到左右目标速度
+            tL = clampf(target_L + u, -TARGET_LIMIT, TARGET_LIMIT);
+            tR = clampf(target_R - u, -TARGET_LIMIT, TARGET_LIMIT);
+          }
         }
 
         pid_L.Exp = tL;
@@ -303,12 +351,14 @@ int main(void) {
   PID_Init(&pid_L, 10.0f, 10.0f, 3.0f, 999.0f, -999.0f, 400.0f);
   PID_Init(&pid_R, 10.0f, 10.0f, 3.0f, 999.0f, -999.0f, 400.0f);
   PID_Init(&pid_yaw, 1.0f, 0.0f, 10.0f, 10.0f, -10.0f, 400.0f);
+  PID_Init(&pid_trace, 1.0f, 0.0f, 10.0f, 10.0f, -10.0f, 400.0f);
 
   target_L = 0;
   target_R = 0;
 
   Motor_Init();
   HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_RESET);
+  HAL_Delay(500);
   // MPU6050_Calculate_Angle();
   /* USER CODE END 2 */
 
@@ -339,15 +389,21 @@ int main(void) {
         target_Y -= 0.5;
       }
       print_flag = 0;
+      TraceSensor_Update();
+      TraceSensor_GetLineState();
       // float x = pid_yaw.Out;
-      float y = mpu_data.yaw;
+      // float y = mpu_data.yaw;
 
-      msgf(MSG_LOG, "%s,%d",
-           float_to_string(TICK_TO_V((M_speed_L + M_speed_R) / 2.0), float_buf1,
-                           2),
-           (int)y);
+      // msgf(MSG_LOG, "%s,%d",
+      //      float_to_string(TICK_TO_V((M_speed_L + M_speed_R) / 2.0),
+      //      float_buf1,
+      //                      2),
+      //      (int)y);
       // msgf(MSG_LOG, "%d, %d", (int)(target_L + pid_yaw.Out),
       //      (int)(target_R - pid_yaw.Out));
+      msgf(MSG_LOG, "%d,%d", TraceSensor_GetFilteredValue(0),
+           TraceSensor_GetFilteredValue(1));
+      TraceSensor_Update();
     }
 
     /* USER CODE END WHILE */

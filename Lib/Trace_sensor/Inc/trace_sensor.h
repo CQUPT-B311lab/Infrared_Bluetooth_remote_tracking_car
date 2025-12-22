@@ -9,7 +9,6 @@ typedef struct {
   uint16_t raw_value;      // 原始ADC值
   uint16_t filtered_value; // 滤波后的值
   uint8_t is_black;        // 是否检测到黑线
-  float voltage;           // 电压值(3.3V参考)
 } SensorData_t;
 
 // 函数声明
