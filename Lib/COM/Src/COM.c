@@ -29,6 +29,7 @@ extern volatile float target_Y;
 extern PID_t pid_L;
 extern PID_t pid_R;
 extern PID_t pid_yaw;
+extern PID_t pid_trace;
 
 extern uint8_t joystick_mode;
 
@@ -37,6 +38,8 @@ extern uint8_t turn_r_flag;
 
 extern volatile int16_t target_d;
 extern uint8_t distance_mode;
+
+extern uint8_t trace_mode;
 
 /* ========================= 工具函数 ========================= */
 
@@ -327,9 +330,11 @@ uint8_t cmd_parser(const char *cmd) {
         pid = &pid_L;
       if (side == 'R' || side == 'r')
         pid = &pid_R;
-      if (side == 'Y' || side == 'y') {
+      if (side == 'Y' || side == 'y')
         pid = &pid_yaw;
-      }
+      if (side == 'T' || side == 't')
+        pid = &pid_trace;
+
       if (pid == NULL) {
         msg(MSG_ERROR, "PID side must be L/R/Y");
         return 0;
@@ -431,6 +436,15 @@ uint8_t cmd_parser(const char *cmd) {
     }
 
     case CMD_JOY_STICK_MODE: {
+      return 1;
+    }
+
+    case CMD_TRACE_MODE: {
+      if (trace_mode == 1) {
+        trace_mode = 0;
+      } else {
+        trace_mode = 1;
+      }
       return 1;
     }
 

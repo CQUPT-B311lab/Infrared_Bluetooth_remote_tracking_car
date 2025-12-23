@@ -155,8 +155,8 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
     TIM4_RCC++;
     if (TIM4_RCC == 10) {
       TIM4_RCC = 0;
-      M_speed_L = GetSpeed(&htim2); // 脉冲/10ms
-      M_speed_R = GetSpeed(&htim3); // 脉冲/10ms
+      M_speed_L = GetSpeed(&htim3); // 脉冲/10ms
+      M_speed_R = GetSpeed(&htim2); // 脉冲/10ms
       float yaw_now = mpu_data.yaw;
 
       if (stop_flag) {
@@ -212,11 +212,11 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
 
           // 丢线：两边都没检测到黑线
           if (!left_black && !right_black) {
-            pid_trace.Exp = 0.0f;
-            pid_trace.Mea = trace_last_error;
+            // pid_trace.Exp = 0.0f;
+            // pid_trace.Mea = trace_last_error;
 
-            tL = clampf(pid_trace.Out, -TARGET_LIMIT, TARGET_LIMIT);
-            tR = clampf(-pid_trace.Out, -TARGET_LIMIT, TARGET_LIMIT);
+            tL = clampf(target_L, -TARGET_LIMIT, TARGET_LIMIT);
+            tR = clampf(target_R, -TARGET_LIMIT, TARGET_LIMIT);
           } else {
 
             // 连续误差：左右差值
@@ -282,8 +282,8 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
         if (outR < -PWM_MAX)
           outR = -PWM_MAX;
 
-        SetSpeed(&htim4, outL); // 左轮
-        SetSpeed(&htim1, outR); // 右轮
+        SetSpeed(&htim1, outL); // 左轮
+        SetSpeed(&htim4, outR); // 右轮
       }
       print_flag = 1;
     }
@@ -350,7 +350,7 @@ int main(void) {
 
   PID_Init(&pid_L, 10.0f, 10.0f, 3.0f, 999.0f, -999.0f, 400.0f);
   PID_Init(&pid_R, 10.0f, 10.0f, 3.0f, 999.0f, -999.0f, 400.0f);
-  PID_Init(&pid_yaw, 1.0f, 0.0f, 10.0f, 10.0f, -10.0f, 400.0f);
+  PID_Init(&pid_yaw, 1.0f, 0.0f, 0.0f, 10.0f, -10.0f, 400.0f);
   PID_Init(&pid_trace, 1.0f, 0.0f, 10.0f, 10.0f, -10.0f, 400.0f);
 
   target_L = 0;

@@ -36,6 +36,7 @@ typedef enum {
   CMD_RESET_PID = 16,      // 重置PID状态
   CMD_SET_YAW = 17,        // 设置偏航角
   CMD_JOY_STICK_MODE = 18, // 摇杆模式
+  CMD_TRACE_MODE = 19,     // 寻迹模式
   // 测试指令
   CMD_PING = 20,
 } UART_CMD_ID_t;

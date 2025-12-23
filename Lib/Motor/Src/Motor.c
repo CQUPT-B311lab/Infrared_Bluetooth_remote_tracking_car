@@ -10,9 +10,9 @@ int16_t GetSpeed(TIM_HandleTypeDef *tim) {
   int16_t speed;
   // 左轮TIM2，右轮TIM3
   if (tim->Instance == TIM2) {
-    speed = (int16_t)__HAL_TIM_GET_COUNTER(tim);
+    speed = -(int16_t)__HAL_TIM_GET_COUNTER(tim);
   } else {
-    speed = (int16_t)__HAL_TIM_GET_COUNTER(tim);
+    speed = -(int16_t)__HAL_TIM_GET_COUNTER(tim);
   }
   __HAL_TIM_SET_COUNTER(tim, 0);
   return speed;
@@ -46,10 +46,10 @@ void SetSpeed(TIM_HandleTypeDef *tim, int16_t speed) {
     // 右轮 - 使用 AIN1/AIN2
     __HAL_TIM_SET_COMPARE(tim, TIM_CHANNEL_1, abs_speed);
 
-    if (s > 0) {
+    if (s < 0) {
       HAL_GPIO_WritePin(AIN1_GPIO_Port, AIN1_Pin, GPIO_PIN_SET);
       HAL_GPIO_WritePin(AIN2_GPIO_Port, AIN2_Pin, GPIO_PIN_RESET);
-    } else if (s < 0) {
+    } else if (s > 0) {
       HAL_GPIO_WritePin(AIN1_GPIO_Port, AIN1_Pin, GPIO_PIN_RESET);
       HAL_GPIO_WritePin(AIN2_GPIO_Port, AIN2_Pin, GPIO_PIN_SET);
     } else {
@@ -61,10 +61,10 @@ void SetSpeed(TIM_HandleTypeDef *tim, int16_t speed) {
     // 左轮 - 使用 BIN1/BIN2，TIM4 用 CHANNEL_4
     __HAL_TIM_SET_COMPARE(tim, TIM_CHANNEL_4, abs_speed);
 
-    if (s > 0) {
+    if (s < 0) {
       HAL_GPIO_WritePin(BIN1_GPIO_Port, BIN1_Pin, GPIO_PIN_RESET);
       HAL_GPIO_WritePin(BIN2_GPIO_Port, BIN2_Pin, GPIO_PIN_SET);
-    } else if (s < 0) {
+    } else if (s > 0) {
       HAL_GPIO_WritePin(BIN1_GPIO_Port, BIN1_Pin, GPIO_PIN_SET);
       HAL_GPIO_WritePin(BIN2_GPIO_Port, BIN2_Pin, GPIO_PIN_RESET);
     } else {
