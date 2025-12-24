@@ -3,11 +3,11 @@
 #include "stm32f1xx_hal_gpio.h"
 #include <stdint.h>
 
-// 下标  寻迹模块通道编号（0：左，8：右，以前进方向为参考）
-//  0         1
-//  1         1
-//  2         1
-//  3         1
+// ADC通道  寻迹模块通道编号（0：左，8：右，以前进方向为参考）
+//   6         6
+//   7         8
+//   8         3
+//   9         1
 
 volatile uint16_t adc_dma_buffer[TRACE_CHANNELS];
 
