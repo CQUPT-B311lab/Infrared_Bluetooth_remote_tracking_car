@@ -3,6 +3,12 @@
 #include "stm32f1xx_hal_gpio.h"
 #include <stdint.h>
 
+// 下标  寻迹模块通道编号（0：左，8：右，以前进方向为参考）
+//  0         1
+//  1         1
+//  2         1
+//  3         1
+
 volatile uint16_t adc_dma_buffer[TRACE_CHANNELS];
 
 // 传感器数据
@@ -14,8 +20,8 @@ static uint16_t filter_buffer[TRACE_CHANNELS][FILTER_SIZE] = {0};
 static uint8_t filter_index = 0;
 
 // 阈值
-static uint16_t black_threshold = 3900; // 高于此值为黑线
-static uint16_t white_threshold = 3900; // 低于此值为白色
+static uint16_t black_threshold = 3800; // 高于此值为黑线
+static uint16_t white_threshold = 3700; // 低于此值为白色
 
 extern ADC_HandleTypeDef hadc1;
 extern DMA_HandleTypeDef hdma_adc1;

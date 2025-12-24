@@ -3,7 +3,7 @@
 
 #include "main.h"
 
-#define TRACE_CHANNELS 2
+#define TRACE_CHANNELS 4
 
 typedef struct {
   uint16_t raw_value;      // 原始ADC值
