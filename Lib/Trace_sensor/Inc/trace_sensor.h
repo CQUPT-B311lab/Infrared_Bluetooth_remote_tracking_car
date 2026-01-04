@@ -11,6 +11,13 @@ typedef struct {
   uint8_t is_black;        // 是否检测到黑线
 } SensorData_t;
 
+typedef enum {
+  STATE_TRACKING = 0,
+  STATE_GAP,
+  STATE_TRANSITION,
+  STATE_INIT
+} CarState_t;
+
 // 函数声明
 void TraceSensor_Init(void);
 void TraceSensor_Update(void);
@@ -21,5 +28,7 @@ uint16_t TraceSensor_GetFilteredValue(uint8_t channel);
 uint8_t TraceSensor_IsBlack(uint8_t channel);
 uint8_t TraceSensor_GetLineState(void);
 void TraceSensor_Calibrate(void);
+float TraceSensor_GetWeightedError(void);
+uint8_t TraceSensor_GetLinePosition(void);
 
 #endif

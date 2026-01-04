@@ -102,7 +102,11 @@ volatile int16_t measure_d = 0;
 
 PID_t pid_trace;
 uint8_t trace_mode = 0;
-float trace_last_error = 0.0;
+float last_tracking_error = 0.0;
+volatile CarState_t car_state = STATE_INIT;
+volatile uint32_t gap_timer = 0;
+volatile uint8_t gap_direction = 0; // 0=未确定, 1=左转寻找, 2=右转寻找
+volatile float last_yaw = 0.0f;     // 保存上次的角度值
 
 volatile uint8_t TIM4_RCC = 0;
 volatile uint8_t TIM1_RCC = 0;
@@ -180,66 +184,184 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
 
         float tL, tR;
 
-        if (!trace_mode) {
-          float diff_yaw = normalize_angle(target_Y) - normalize_angle(yaw_now);
-          // 处理跨越±180°的情况
-          if (diff_yaw > 180.0f) {
-            diff_yaw -= 360.0f;
-          } else if (diff_yaw < -180.0f) {
-            diff_yaw += 360.0f;
-          }
+        if (trace_mode) {
+          // 读取四个传感器的状态
+          uint8_t left_out = TraceSensor_IsBlack(0);  // 最左传感器
+          uint8_t left_mid = TraceSensor_IsBlack(1);  // 左中传感器
+          uint8_t right_mid = TraceSensor_IsBlack(2); // 右中传感器
+          uint8_t right_out = TraceSensor_IsBlack(3); // 最右传感器
 
-          pid_yaw.Exp = 0;
-          pid_yaw.Mea = diff_yaw;
-          float yaw_correction = PID_Update(&pid_yaw);
+          uint8_t any_black = left_out || left_mid || right_mid || right_out;
 
-          // 目标限幅：避免不可能达到的设定导致长时间饱和
-          if (fabs(diff_yaw) < 5.0) {
-            tL = clampf(target_L + yaw_correction, -TARGET_LIMIT, TARGET_LIMIT);
-            tR = clampf(target_R - yaw_correction, -TARGET_LIMIT, TARGET_LIMIT);
-          } else {
-            tL = clampf(yaw_correction, -TARGET_LIMIT, TARGET_LIMIT);
-            tR = clampf(-yaw_correction, -TARGET_LIMIT, TARGET_LIMIT);
+          // 基础速度设置（所有状态共用）
+          float base_speed = 8.0f;  // 基础速度
+          float turn_speed = 12.0f; // 转向时外轮速度
+          float inner_speed = 5.0f; // 转向时内轮速度
+
+          switch (car_state) {
+          case STATE_INIT:
+            // 初始状态，等待检测到黑线
+            if (any_black) {
+              car_state = STATE_TRACKING;
+              gap_timer = 0;
+              // 初始化目标速度
+              target_L = base_speed;
+              target_R = base_speed;
+              // 记录当前航向
+              last_yaw = mpu_data.yaw;
+              target_Y = last_yaw;
+            } else {
+              // 等待，不动或缓慢前进
+              target_L = 0;
+              target_R = 0;
+            }
+            break;
+
+          case STATE_TRACKING:
+            if (!any_black) {
+              // 进入空白段
+              car_state = STATE_GAP;
+              gap_timer = 0;
+              // 保存最后一次误差方向，用于判断转向
+              gap_direction = (last_tracking_error < 0) ? 1 : 2;
+              // 保持当前航向直线前进
+              target_L = base_speed;
+              target_R = base_speed;
+            } else {
+              // 正常跟踪
+              float error = TraceSensor_GetWeightedError();
+              last_tracking_error = error;
+
+              // PID控制 - 调节目标航向
+              pid_trace.Exp = 0.0f; // 目标误差为0
+              pid_trace.Mea = error;
+              float steering = PID_Update(&pid_trace);
+
+              // 将转向转化为目标航向调整
+              // 注意：steering是角度调整量，单位是度
+              float yaw_adjust = steering * 5.0f; // 比例因子，需要调试
+
+              // 更新目标航向
+              target_Y = last_yaw + yaw_adjust;
+
+              // 归一化角度
+              if (target_Y > 180.0f)
+                target_Y -= 360.0f;
+              if (target_Y < -180.0f)
+                target_Y += 360.0f;
+
+              // 设置基础速度
+              target_L = base_speed;
+              target_R = base_speed;
+
+              // 保存当前角度，用于下一次计算
+              last_yaw = mpu_data.yaw;
+            }
+            break;
+
+          case STATE_GAP:
+            gap_timer++;
+
+            if (any_black) {
+              // 在空白段中又检测到黑线，回到跟踪状态
+              car_state = STATE_TRACKING;
+              // 重新记录航向
+              last_yaw = mpu_data.yaw;
+            } else if (gap_timer > 60) { // 60 * 10ms = 600ms（根据实际调整）
+              // 空白段超时，进入过渡状态
+              car_state = STATE_TRANSITION;
+            } else {
+              // 保持直线行驶
+              target_L = base_speed;
+              target_R = base_speed;
+              // 保持当前航向
+              target_Y = last_yaw;
+            }
+            break;
+
+          case STATE_TRANSITION:
+            if (left_mid && right_mid) {
+              // 两个中间传感器都检测到黑线，回到跟踪状态
+              car_state = STATE_TRACKING;
+              last_yaw = mpu_data.yaw;
+              target_L = base_speed;
+              target_R = base_speed;
+            } else {
+              // 根据gap_direction决定转向方向
+              if (gap_direction == 1) {
+                // 左转寻找（顺时针转，target_Y增加）
+                target_Y += 2.0f;       // 每次增加2度
+                target_L = inner_speed; // 左轮慢
+                target_R = turn_speed;  // 右轮快
+              } else {
+                // 右转寻找（逆时针转，target_Y减少）
+                target_Y -= 2.0f;       // 每次减少2度
+                target_L = turn_speed;  // 左轮快
+                target_R = inner_speed; // 右轮慢
+              }
+
+              // 归一化角度
+              if (target_Y > 180.0f)
+                target_Y -= 360.0f;
+              if (target_Y < -180.0f)
+                target_Y += 360.0f;
+
+              // 如果检测到一侧的传感器，提前调整
+              if (left_out || left_mid) {
+                // 左侧有检测，需要右转调整
+                target_Y -= 1.0f; // 轻微右转
+                target_L = turn_speed * 0.8f;
+                target_R = inner_speed * 0.8f;
+              } else if (right_out || right_mid) {
+                // 右侧有检测，需要左转调整
+                target_Y += 1.0f; // 轻微左转
+                target_L = inner_speed * 0.8f;
+                target_R = turn_speed * 0.8f;
+              }
+            }
+            break;
           }
+        }
+
+        float diff_yaw = normalize_angle(target_Y) - normalize_angle(yaw_now);
+        diff_yaw = normalize_angle(diff_yaw);
+
+        if (fabs(diff_yaw) < 1.0f) {
+          diff_yaw = 0.0f;
+        }
+
+        pid_yaw.Exp = 0;
+        pid_yaw.Mea = diff_yaw;
+        float yaw_correction = PID_Update(&pid_yaw);
+
+        // 根据循迹模式调整角度环权重
+        float yaw_weight = 1.0f;
+        if (trace_mode) {
+          // 在循迹模式下，根据状态调整角度环权重
+          switch (car_state) {
+          case STATE_TRACKING:
+            yaw_weight = 1.0f; // 全权重
+            break;
+          case STATE_GAP:
+            yaw_weight = 0.8f; // 略降低权重
+            break;
+          case STATE_TRANSITION:
+            yaw_weight = 0.5f; // 大幅降低权重，让传感器主导
+            break;
+          default:
+            yaw_weight = 1.0f;
+          }
+        }
+
+        // 目标限幅：避免不可能达到的设定导致长时间饱和
+        if (fabs(diff_yaw) < 5.0) {
+          tL = clampf(target_L + yaw_correction * yaw_weight, -TARGET_LIMIT,
+                      TARGET_LIMIT);
+          tR = clampf(target_R - yaw_correction * yaw_weight, -TARGET_LIMIT,
+                      TARGET_LIMIT);
         } else {
-          // 读取滤波值
-          float trance_adc_L = (float)TraceSensor_GetFilteredValue(0);
-          float trance_adc_R = (float)TraceSensor_GetFilteredValue(1);
-
-          // 是否在黑线上
-          uint8_t left_black = TraceSensor_IsBlack(0);
-          uint8_t right_black = TraceSensor_IsBlack(1);
-
-          // 丢线：两边都没检测到黑线
-          if (!left_black && !right_black) {
-            // pid_trace.Exp = 0.0f;
-            // pid_trace.Mea = trace_last_error;
-
-            tL = clampf(target_L, -TARGET_LIMIT, TARGET_LIMIT);
-            tR = clampf(target_R, -TARGET_LIMIT, TARGET_LIMIT);
-          } else {
-
-            // 连续误差：左右差值
-            float e = (trance_adc_L - trance_adc_R);
-
-            // 归一化（降低光照变化影响）
-            float denom = (trance_adc_L + trance_adc_R);
-            if (denom < 1.0f)
-              denom = 1.0f;
-            e = e / denom;  // 约[-1,1]
-            e = e * 100.0f; // 放大到好调参的量级
-
-            trace_last_error = e;
-
-            pid_trace.Exp = 0.0f;
-            pid_trace.Mea = e;
-            float u = PID_Update(&pid_trace);
-            u = clampf(u, -10, 10);
-
-            // 映射到左右目标速度
-            tL = clampf(target_L + u, -TARGET_LIMIT, TARGET_LIMIT);
-            tR = clampf(target_R - u, -TARGET_LIMIT, TARGET_LIMIT);
-          }
+          tL = clampf(yaw_correction, -TARGET_LIMIT, TARGET_LIMIT);
+          tR = clampf(-yaw_correction, -TARGET_LIMIT, TARGET_LIMIT);
         }
 
         pid_L.Exp = tL;
@@ -351,7 +473,7 @@ int main(void) {
   PID_Init(&pid_L, 10.0f, 10.0f, 3.0f, 999.0f, -999.0f, 400.0f);
   PID_Init(&pid_R, 10.0f, 10.0f, 3.0f, 999.0f, -999.0f, 400.0f);
   PID_Init(&pid_yaw, 1.0f, 0.0f, 0.0f, 10.0f, -10.0f, 400.0f);
-  PID_Init(&pid_trace, 1.0f, 0.0f, 10.0f, 10.0f, -10.0f, 400.0f);
+  PID_Init(&pid_trace, 0.5f, 0.0f, 0.05f, 10.0f, -10.0f, 400.0f);
 
   target_L = 0;
   target_R = 0;
@@ -391,6 +513,10 @@ int main(void) {
       print_flag = 0;
       TraceSensor_Update();
       TraceSensor_GetLineState();
+      // if (TraceSensor_IsBlack(0) || TraceSensor_IsBlack(1) ||
+      //     TraceSensor_IsBlack(2) || TraceSensor_IsBlack(3)) {
+      //   HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_RESET);
+      // }
       // float x = pid_yaw.Out;
       // float y = mpu_data.yaw;
 
@@ -401,8 +527,7 @@ int main(void) {
       //      (int)y);
       // msgf(MSG_LOG, "%d, %d", (int)(target_L + pid_yaw.Out),
       //      (int)(target_R - pid_yaw.Out));
-      msgf(MSG_LOG, "%d,%d", TraceSensor_GetFilteredValue(0),
-           TraceSensor_GetFilteredValue(1));
+      TraceSensor_Calibrate();
       TraceSensor_Update();
     }
 

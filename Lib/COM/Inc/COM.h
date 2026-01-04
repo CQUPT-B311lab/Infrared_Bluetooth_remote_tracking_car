@@ -32,11 +32,11 @@ typedef enum {
   CMD_SET_PID = 12,
   CMD_GET_SPEED = 13,
   CMD_SET_TARGET_SPEED = 14,
-  CMD_GET_PID = 15,        // 获取当前PID参数
-  CMD_RESET_PID = 16,      // 重置PID状态
-  CMD_SET_YAW = 17,        // 设置偏航角
-  CMD_JOY_STICK_MODE = 18, // 摇杆模式
-  CMD_TRACE_MODE = 19,     // 寻迹模式
+  CMD_GET_PID = 15,       // 获取当前PID参数
+  CMD_RESET_PID = 16,     // 重置PID状态
+  CMD_SET_YAW = 17,       // 设置偏航角
+  CMD_SET_THRESHOLD = 18, // 设置寻迹阈值
+  CMD_TRACE_MODE = 19,    // 寻迹模式
   // 测试指令
   CMD_PING = 20,
 } UART_CMD_ID_t;

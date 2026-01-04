@@ -41,6 +41,8 @@ extern uint8_t distance_mode;
 
 extern uint8_t trace_mode;
 
+extern uint16_t black_threshold;
+
 /* ========================= 工具函数 ========================= */
 
 #ifndef COM_TX_BUF_SIZE
@@ -435,7 +437,14 @@ uint8_t cmd_parser(const char *cmd) {
       return 1;
     }
 
-    case CMD_JOY_STICK_MODE: {
+    case CMD_SET_THRESHOLD: {
+      if (strlen(param) == 0) {
+        msg(MSG_ERROR, "Need target speed");
+        return 0;
+      }
+
+      uint16_t thr = atol(param);
+      black_threshold = thr;
       return 1;
     }
 
